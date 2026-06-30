@@ -57,7 +57,7 @@ from sklearn.metrics import (
 # ─────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────
-DATA_ROOT      = Path(r"C:\abalaji\bichat\ORIGINAL_DATA\chunks_20")
+DATA_ROOT      = Path(r"D:\abalaji\chunks_20")
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
 STEP_SIZE      = 128
@@ -67,7 +67,7 @@ LR             = 5e-4
 WEIGHT_DECAY   = 1e-4
 PCA_COMPONENTS = 32
 PATIENCE       = 7
-VAL_SIZE       = 0.15          # fraction of TRAIN windows carved out for CNN early-stopping val
+VAL_SIZE       = 0.15
 RANDOM_SEED    = 42
 DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
