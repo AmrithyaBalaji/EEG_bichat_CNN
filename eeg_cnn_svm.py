@@ -60,7 +60,7 @@ from sklearn.metrics import (
 DATA_ROOT      = Path(r"D:\abalaji\chunks_20")
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
-STEP_SIZE      = 128
+STEP_SIZE      = 256
 BATCH_SIZE     = 64
 EPOCHS         = 25
 LR             = 5e-4
@@ -76,7 +76,7 @@ SAVE_PCA       = "eeg_pca_v4.pkl"
 SAVE_DIR       = Path("models_v4")
 SAVE_DIR.mkdir(exist_ok=True)
 
-RNG = np.random.default_rng(RANDOM_SEED)   # controls which window is held out per chunk
+RNG = np.random.default_rng(RANDOM_SEED)
 
 
 # ─────────────────────────────────────────────────────────
@@ -118,7 +118,6 @@ def extract_windows_with_holdout(chunk, label, window_size, step_size, rng):
     train_windows = []
     for start in range(0, max_start + 1, step_size):
         end = start + window_size
-        # keep only windows that do NOT overlap the held-out test window at all
         if end <= test_start or start >= test_end:
             train_windows.append(chunk[start:end])
 
@@ -469,12 +468,10 @@ def evaluate(name, y_te, y_pred, y_proba):
 def main():
     print(f"Device : {DEVICE}\n")
 
-    # ── Load data: per-chunk holdout test window + non-overlapping train windows ──
     (X_train, y_train, g_train,
      X_test,  y_test,  g_test,
      pid_to_idx, pid_labels) = load_all_data(DATA_ROOT, WINDOW_SIZE, STEP_SIZE, RNG)
 
-    # ── Carve a val split out of the TRAIN window pool only (window-wise stratified) ──
     idx = np.arange(len(y_train))
     tr_idx, val_idx = train_test_split(
         idx, test_size=VAL_SIZE, random_state=0, stratify=y_train
@@ -482,26 +479,22 @@ def main():
 
     X_tr,  y_tr  = X_train[tr_idx],  y_train[tr_idx]
     X_val, y_val = X_train[val_idx], y_train[val_idx]
-    # X_train / y_train themselves (tr+val combined) used later for full-train feature extraction
 
     print(f"Train windows (CNN fit) : {len(y_tr):,}")
     print(f"Val   windows           : {len(y_val):,}")
     print(f"Full-train windows      : {len(y_train):,}")
     print(f"Test  windows           : {len(y_test):,}\n")
 
-    # Class weights for CNN
     cw = compute_class_weight('balanced', classes=np.array([0, 1]), y=y_tr)
     pos_weight = float(cw[1] / cw[0])
     print(f"Class weights  : survived={cw[0]:.3f}, died={cw[1]:.3f}")
     print(f"pos_weight     : {pos_weight:.3f}\n")
 
-    # DataLoaders
     train_loader      = DataLoader(EEGDataset(X_tr,  y_tr),  batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
     val_loader        = DataLoader(EEGDataset(X_val, y_val), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     test_loader       = DataLoader(EEGDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     full_train_loader = DataLoader(EEGDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    # Build & train CNN feature extractor
     model = EEG_CNN().to(DEVICE)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters : {n_params:,}\n")
@@ -510,7 +503,6 @@ def main():
               epochs=EPOCHS, lr=LR, weight_decay=WEIGHT_DECAY,
               pos_weight=pos_weight, patience=PATIENCE)
 
-    # Extract window-level CNN features (128-dim) for train/test
     print("── Phase 2: Extracting CNN features (window-level) ──")
     X_tr_feat, y_tr_feat = extract_features(model, full_train_loader, DEVICE)
     X_te_feat, y_te_feat = extract_features(model, test_loader,        DEVICE)
@@ -519,7 +511,6 @@ def main():
 
     torch.save(model.state_dict(), SAVE_MODEL)
 
-    # ── PCA fit on train features only ──
     print(f"── Fitting PCA (n={PCA_COMPONENTS}) ───────")
     pca = PCA(n_components=PCA_COMPONENTS, random_state=42)
     X_tr_pca = pca.fit_transform(X_tr_feat)
@@ -530,7 +521,6 @@ def main():
 
     results = {}
 
-    # ── Helper to run a given (raw / pca) feature set through all 3 classifiers ──
     def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_):
         # SVM (calibrated for proba)
         print(f"\n========== {tag}: SVM ==========")
@@ -543,7 +533,6 @@ def main():
         results[f"{tag}_SVM"] = evaluate(f"{tag} — SVM", y_te_, y_pred, y_proba)
         joblib.dump(svm, SAVE_DIR / f"svm_{tag}.pkl")
 
-        # Random Forest
         print(f"\n========== {tag}: Random Forest ==========")
         rf = RandomForestClassifier(
             n_estimators=300, max_depth=None, min_samples_leaf=2,
@@ -555,7 +544,6 @@ def main():
         results[f"{tag}_RF"] = evaluate(f"{tag} — Random Forest", y_te_, y_pred, y_proba)
         joblib.dump(rf, SAVE_DIR / f"rf_{tag}.pkl")
 
-        # One-layer NN
         print(f"\n========== {tag}: One-Layer NN ==========")
         nn_model, y_pred, y_proba = train_one_layer_nn(
             X_tr_, y_tr_, X_te_, y_te_, DEVICE
@@ -563,13 +551,10 @@ def main():
         results[f"{tag}_NN"] = evaluate(f"{tag} — One-Layer NN", y_te_, y_pred, y_proba)
         torch.save(nn_model.state_dict(), SAVE_DIR / f"onelayernn_{tag}.pth")
 
-    # Without PCA (raw 128-dim CNN features)
     run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat)
 
-    # With PCA
     run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat)
 
-    # ── Summary ──
     print("\n\n========== SUMMARY (held-out per-chunk test windows) ==========")
     header = f"  {'Model':<14}{'F1(Died)':>10}{'F1(macro)':>11}{'AUC':>8}{'AvgConf':>9}"
     print(header)
@@ -594,24 +579,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# ─────────────────────────────────────────────────────────
-# NOTE on patient-level grouping
-# ─────────────────────────────────────────────────────────
-# This version fixes WITHIN-CHUNK leakage: no train window and the held-out
-# test window from the same chunk share raw samples.
-#
-# It does NOT enforce patient-level grouping: if a patient has multiple
-# chunks, each chunk independently contributes its own train windows and its
-# own held-out test window, so that patient's data can appear in BOTH train
-# and test (just from different chunks / non-overlapping spans). If you also
-# want full patient-level isolation (test patients entirely unseen during
-# training), the cleanest approach is:
-#   1. Split `all_pids` into train-patients / test-patients up front
-#      (e.g. via train_test_split on pid list, stratified by pid_labels).
-#   2. For train-patients' chunks: use extract_windows_with_holdout as-is,
-#      or simply use plain sliding windows for ALL of train (no need to
-#      hold out a test window from train-patient chunks).
-#   3. For test-patients' chunks: use plain sliding windows (no train/test
-#      split within the chunk needed) and put them all in the test set.
