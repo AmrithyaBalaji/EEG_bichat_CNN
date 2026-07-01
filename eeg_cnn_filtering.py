@@ -1,3 +1,29 @@
+"""
+EEG Death vs No-Death Classification — v5 (lowpass-filtered, non-overlapping holdout window split, multi-classifier)
+CNN → Flatten/FC(128) features → {SVM, RandomForest, 1-layer NN} × {with PCA, without PCA}
+
+Changes vs v4:
+  - NEW: Butter lowpass filtering preprocessing step.
+        butter_lowpass_filter(signal, order, cutoff, fs) — filters a single channel.
+        filter_and_save_all_files(...) — walks every CSV in DATA_ROOT, applies the
+        lowpass filter to each of the 16 EEG channels, and saves the filtered CSVs
+        to FILTERED_DATA_ROOT, mirroring the 0/ and 1/ folder structure.
+        This runs once (skipped if output already exists, unless FORCE_REFILTER=True)
+        before any windowing/training, and all downstream loading reads from
+        FILTERED_DATA_ROOT instead of the raw DATA_ROOT.
+  - Everything else (per-chunk holdout test window, non-overlapping train windows,
+    CNN feature extractor, 6 classifier variants) is unchanged from v4.
+
+Folder structure (raw):
+  chunks_20/0/  ← survived  (1214_chunk_000.csv ...)
+  chunks_20/1/  ← died      (2045_chunk_000.csv ...)
+Each CSV: (15361, 17) — header row + 16 EEG cols + 1 extra col (dropped)
+
+Folder structure (filtered, auto-created):
+  chunks_20_filtered/0/ ...
+  chunks_20_filtered/1/ ...
+"""
+
 import re
 import numpy as np
 import pandas as pd
@@ -22,13 +48,16 @@ from sklearn.metrics import (
     classification_report, confusion_matrix, roc_auc_score, f1_score
 )
 
+# ─────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────
 DATA_ROOT          = Path(r"D:\abalaji\chunks_20")
 FILTERED_DATA_ROOT  = Path(r"D:\abalaji\chunks_20_filtered")
-FORCE_REFILTER      = False
+FORCE_REFILTER      = True
 
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
-STEP_SIZE      = 256
+STEP_SIZE      = 128
 BATCH_SIZE     = 64
 EPOCHS         = 25
 LR             = 5e-4
@@ -39,18 +68,22 @@ VAL_SIZE       = 0.15
 RANDOM_SEED    = 42
 DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Lowpass filter settings
 FILTER_ORDER   = 4
-FILTER_CUTOFF  = 40.0
-FILTER_FS      = 256.0
+FILTER_CUTOFF  = 100.0     # Hz
+FILTER_FS      = 256.0    # Hz — sampling rate of the EEG signal; adjust to your actual fs
 
-N_SURVIVED_TEST_PER_FOLD = 3
-N_DIED_TEST_PER_FOLD     = 1
-
-SAVE_DIR       = Path("models_v5_kfold")
+SAVE_MODEL     = "eeg_cnn_v5.pth"
+SAVE_PCA       = "eeg_pca_v5.pkl"
+SAVE_DIR       = Path("models_v5")
 SAVE_DIR.mkdir(exist_ok=True)
 
-RNG = np.random.default_rng(RANDOM_SEED)
+RNG = np.random.default_rng(RANDOM_SEED)   # controls which window is held out per chunk
 
+
+# ─────────────────────────────────────────────────────────
+# 0. LOWPASS FILTERING
+# ─────────────────────────────────────────────────────────
 def butter_lowpass_filter(signal, order, cutoff, fs):
     signal = pd.to_numeric(signal, errors='coerce').to_numpy(dtype=np.float64) \
         if isinstance(signal, pd.Series) else np.asarray(signal, dtype=np.float64)
@@ -66,8 +99,17 @@ def butter_lowpass_filter(signal, order, cutoff, fs):
     w, h = freqz(b, a)
     return filtfilt(b, a, signal)
 
+
 def filter_and_save_all_files(data_root, output_root, order, cutoff, fs,
                                n_channels=N_CHANNELS, force=False):
+    """
+    Walk every CSV under data_root/{0,1}/, lowpass-filter each of the first
+    n_channels columns independently, and write the filtered CSV (same shape,
+    same header, same filename) into output_root/{0,1}/.
+
+    Skips the whole pass if output_root already contains files for both
+    classes, unless force=True.
+    """
     output_root = Path(output_root)
 
     already_done = (
@@ -119,17 +161,58 @@ def filter_and_save_all_files(data_root, output_root, order, cutoff, fs,
 
     print(f"[Filtering] Done. {n_files} files filtered, {n_failed} failed.\n")
 
+
+# ─────────────────────────────────────────────────────────
+# 1. DATA LOADING
+# ─────────────────────────────────────────────────────────
 def parse_filename(filename):
     match = re.match(r"(\d+)_chunk_(\d+)\.csv", filename)
     if match:
         return int(match.group(1)), int(match.group(2))
     return None, None
 
-def discover_patient_files(data_root):
+
+def extract_windows_with_holdout(chunk, label, window_size, step_size, rng):
+    """
+    Pick ONE random window position in `chunk` to be a TEST window.
+    Build TRAIN windows via the normal sliding-window scheme over the
+    rest of the chunk, skipping any training window whose span overlaps
+    the test window's span (so train/test never share raw samples from
+    this chunk).
+    """
+    n = len(chunk)
+    max_start = n - window_size
+
+    if max_start < 0:
+        return (np.empty((0, window_size, chunk.shape[1]), dtype=np.float32),
+                np.empty((0,), dtype=np.int64),
+                None, None)
+
+    test_start = int(rng.integers(0, max_start + 1))
+    test_end   = test_start + window_size
+    test_window = chunk[test_start:test_end].astype(np.float32)
+
+    train_windows = []
+    for start in range(0, max_start + 1, step_size):
+        end = start + window_size
+        if end <= test_start or start >= test_end:
+            train_windows.append(chunk[start:end])
+
+    if train_windows:
+        train_windows = np.array(train_windows, dtype=np.float32)
+    else:
+        train_windows = np.empty((0, window_size, chunk.shape[1]), dtype=np.float32)
+
+    train_labels = np.full(len(train_windows), label, dtype=np.int64)
+
+    return train_windows, train_labels, test_window, label
+
+
+def load_all_data(data_root, window_size, step_size, rng):
     patient_files = defaultdict(list)
 
     for label in [0, 1]:
-        folder = Path(data_root) / str(label)
+        folder = data_root / str(label)
         if not folder.exists():
             raise FileNotFoundError(f"Folder not found: {folder}")
         csv_files = sorted(folder.glob("*.csv"))
@@ -141,92 +224,32 @@ def discover_patient_files(data_root):
                 continue
             patient_files[pid].append((cid, csv_path, label))
 
+    all_pids = sorted(patient_files.keys())
+    print(f"\nTotal unique patients : {len(all_pids)}")
     pid_labels = {pid: chunks[0][2] for pid, chunks in patient_files.items()}
     lc = Counter(pid_labels.values())
-    print(f"\nTotal unique patients : {len(patient_files)}")
     print(f"  Survived (0) : {lc[0]} patients")
-    print(f"  Died     (1) : {lc[1]} patients\n")
+    print(f"  Died     (1) : {lc[1]} patients")
 
-    return patient_files, pid_labels
+    pid_to_idx = {pid: idx for idx, pid in enumerate(all_pids)}
 
-def make_patient_folds(pid_labels, rng,
-                        n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
-                        n_died_per_fold=N_DIED_TEST_PER_FOLD):
-    died_pids     = [pid for pid, lbl in pid_labels.items() if lbl == 1]
-    survived_pids = [pid for pid, lbl in pid_labels.items() if lbl == 0]
-
-    if len(died_pids) < n_died_per_fold:
-        raise ValueError(
-            f"Need at least {n_died_per_fold} died patient(s) to form a fold; "
-            f"found {len(died_pids)}."
-        )
-    if len(survived_pids) < n_survived_per_fold:
-        raise ValueError(
-            f"Need at least {n_survived_per_fold} survived patient(s) to form a fold; "
-            f"found {len(survived_pids)}."
-        )
-
-    died_pids     = rng.permutation(np.array(died_pids)).tolist()
-    survived_pids = rng.permutation(np.array(survived_pids)).tolist()
-
-    n_folds = len(died_pids) // n_died_per_fold
-    all_pids = set(pid_labels.keys())
-
-    folds = []
-    for i in range(n_folds):
-        test_died = died_pids[i * n_died_per_fold:(i + 1) * n_died_per_fold]
-
-        start = (i * n_survived_per_fold) % len(survived_pids)
-        surv_idx = [(start + j) % len(survived_pids) for j in range(n_survived_per_fold)]
-        test_survived = [survived_pids[j] for j in surv_idx]
-
-        test_pids  = set(test_died) | set(test_survived)
-        train_pids = all_pids - test_pids
-
-        folds.append({
-            "fold": i,
-            "train_pids": sorted(train_pids),
-            "test_pids":  sorted(test_pids),
-            "test_died":  test_died,
-            "test_survived": test_survived,
-        })
-
-    return folds
-
-def extract_windows(chunk, label, window_size, step_size):
-    n = len(chunk)
-    max_start = n - window_size
-    if max_start < 0:
-        return (np.empty((0, window_size, chunk.shape[1]), dtype=np.float32),
-                np.empty((0,), dtype=np.int64))
-
-    windows = []
-    for start in range(0, max_start + 1, step_size):
-        end = start + window_size
-        windows.append(chunk[start:end])
-
-    windows = np.array(windows, dtype=np.float32)
-    labels  = np.full(len(windows), label, dtype=np.int64)
-    return windows, labels
-
-def build_windows_for_patients(patient_files, pids, window_size, step_size,
-                                n_channels=N_CHANNELS, tag=""):
-    pid_to_idx = {pid: idx for idx, pid in enumerate(sorted(patient_files.keys()))}
-
-    windows_all, labels_all, groups_all = [], [], []
+    train_windows_all, train_labels_all, train_groups_all = [], [], []
+    test_windows_all,  test_labels_all,  test_groups_all  = [], [], []
     skipped = 0
-    n_chunks = 0
+    n_chunks_used = 0
 
-    for pid in pids:
-        chunks = sorted(patient_files[pid], key=lambda x: x[0])
+    for pid in all_pids:
+        pid_idx = pid_to_idx[pid]
+        chunks  = sorted(patient_files[pid], key=lambda x: x[0])
+
         for cid, csv_path, label in chunks:
             df = pd.read_csv(csv_path, header=0)
             chunk = df.values.astype(np.float32)
 
-            if chunk.shape[1] == n_channels + 1:
-                chunk = chunk[:, :n_channels]
+            if chunk.shape[1] == N_CHANNELS + 1:
+                chunk = chunk[:, :N_CHANNELS]
 
-            if chunk.shape[1] != n_channels or chunk.shape[0] < window_size:
+            if chunk.shape[1] != N_CHANNELS or chunk.shape[0] < window_size:
                 print(f"  [SKIP] {csv_path.name} shape: {chunk.shape}")
                 skipped += 1
                 continue
@@ -234,25 +257,48 @@ def build_windows_for_patients(patient_files, pids, window_size, step_size,
             scaler = StandardScaler()
             chunk  = scaler.fit_transform(chunk)
 
-            w, l = extract_windows(chunk, label, window_size, step_size)
-            n_chunks += 1
-            if len(w) > 0:
-                windows_all.append(w)
-                labels_all.append(l)
-                groups_all.extend([pid_to_idx[pid]] * len(w))
+            tr_w, tr_l, te_w, te_l = extract_windows_with_holdout(
+                chunk, label, window_size, step_size, rng
+            )
+            n_chunks_used += 1
 
-    if not windows_all:
-        raise RuntimeError(f"No windows produced for {tag} set — check patient ids / data.")
+            if len(tr_w) > 0:
+                train_windows_all.append(tr_w)
+                train_labels_all.append(tr_l)
+                train_groups_all.extend([pid_idx] * len(tr_w))
 
-    X = np.concatenate(windows_all, axis=0)[..., np.newaxis]
-    y = np.concatenate(labels_all, axis=0)
-    g = np.array(groups_all)
+            if te_w is not None:
+                test_windows_all.append(te_w[np.newaxis, ...])
+                test_labels_all.append(te_l)
+                test_groups_all.append(pid_idx)
 
-    print(f"  [{tag}] patients={len(pids)}  chunks_used={n_chunks}  skipped={skipped}  "
-          f"windows={X.shape}  (died={int((y==1).sum())}, survived={int((y==0).sum())})")
+        if (pid_idx + 1) % 20 == 0:
+            print(f"  Processed {pid_idx+1}/{len(all_pids)} patients...")
 
-    return X, y, g
+    print(f"Skipped files : {skipped}")
+    print(f"Chunks contributing a holdout test window : {n_chunks_used}")
 
+    X_train = np.concatenate(train_windows_all, axis=0)[..., np.newaxis]
+    y_train = np.concatenate(train_labels_all,  axis=0)
+    g_train = np.array(train_groups_all)
+
+    X_test  = np.concatenate(test_windows_all, axis=0)[..., np.newaxis]
+    y_test  = np.array(test_labels_all, dtype=np.int64)
+    g_test  = np.array(test_groups_all)
+
+    print(f"\n── Dataset Summary ──────────────────")
+    print(f"Train windows  : {X_train.shape}  "
+          f"(died={int((y_train==1).sum()):,}, survived={int((y_train==0).sum()):,})")
+    print(f"Test  windows  : {X_test.shape}  "
+          f"(died={int((y_test==1).sum()):,}, survived={int((y_test==0).sum()):,})")
+    print(f"─────────────────────────────────────\n")
+
+    return X_train, y_train, g_train, X_test, y_test, g_test, pid_to_idx, pid_labels
+
+
+# ─────────────────────────────────────────────────────────
+# 2. PYTORCH DATASET
+# ─────────────────────────────────────────────────────────
 class EEGDataset(Dataset):
     def __init__(self, X, y):
         X_t = np.transpose(X, (0, 3, 1, 2))
@@ -265,6 +311,10 @@ class EEGDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
+
+# ─────────────────────────────────────────────────────────
+# 3. CNN FEATURE EXTRACTOR
+# ─────────────────────────────────────────────────────────
 class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch=32):
         super().__init__()
@@ -278,6 +328,7 @@ class ConvBlock(nn.Module):
 
     def forward(self, x):
         return self.block(x)
+
 
 class EEG_CNN(nn.Module):
     def __init__(self):
@@ -307,9 +358,12 @@ class EEG_CNN(nn.Module):
     def forward(self, x):
         return self.head(self.forward_features(x))
 
+
+# ─────────────────────────────────────────────────────────
+# 4. CNN TRAINING (with internal val split, early stopping)
+# ─────────────────────────────────────────────────────────
 def train_cnn(model, train_loader, val_loader, device,
-              epochs, lr, weight_decay, pos_weight, patience, min_delta=1e-3,
-              log_prefix=""):
+              epochs, lr, weight_decay, pos_weight, patience, min_delta=1e-3):
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=lr, weight_decay=weight_decay
@@ -323,7 +377,7 @@ def train_cnn(model, train_loader, val_loader, device,
     best_state    = None
     no_improve    = 0
 
-    print(f"{log_prefix}── Training CNN ─────────────")
+    print("── Phase 1: Training CNN ─────────────")
     for epoch in range(1, epochs + 1):
         model.train()
         tr_loss, tr_correct, tr_total = 0.0, 0, 0
@@ -358,7 +412,7 @@ def train_cnn(model, train_loader, val_loader, device,
         tr_acc       = 100.0 * tr_correct  / tr_total
         val_acc      = 100.0 * val_correct / val_total
 
-        print(f"{log_prefix}  Epoch [{epoch:02d}/{epochs}]  "
+        print(f"  Epoch [{epoch:02d}/{epochs}]  "
               f"Train Loss: {avg_tr_loss:.4f} Acc: {tr_acc:.1f}%  |  "
               f"Val Loss: {avg_val_loss:.4f} Acc: {val_acc:.1f}%")
 
@@ -370,14 +424,20 @@ def train_cnn(model, train_loader, val_loader, device,
             no_improve    = 0
         else:
             no_improve += 1
+            print(f"    (no meaningful improvement: {no_improve}/{patience})")
             if no_improve >= patience:
-                print(f"{log_prefix}  Early stopping at epoch {epoch}")
+                print(f"\n  Early stopping at epoch {epoch} "
+                      f"(no improvement > {min_delta} for {patience} epochs)")
                 break
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    print(f"{log_prefix}  Best val loss: {best_val_loss:.4f}\n")
+    print(f"  Best val loss: {best_val_loss:.4f}\n")
 
+
+# ─────────────────────────────────────────────────────────
+# 5. FEATURE EXTRACTION
+# ─────────────────────────────────────────────────────────
 def extract_features(model, loader, device):
     model.eval()
     feats, labels = [], []
@@ -388,6 +448,10 @@ def extract_features(model, loader, device):
             labels.append(y_b.numpy())
     return np.concatenate(feats), np.concatenate(labels)
 
+
+# ─────────────────────────────────────────────────────────
+# 6. ONE-LAYER NN CLASSIFIER (single linear layer + sigmoid)
+# ─────────────────────────────────────────────────────────
 class OneLayerNN(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
@@ -395,6 +459,7 @@ class OneLayerNN(nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
 
 def train_one_layer_nn(X_tr, y_tr, X_te, y_te, device,
                         epochs=100, lr=1e-3, weight_decay=1e-3, batch_size=64):
@@ -430,21 +495,24 @@ def train_one_layer_nn(X_tr, y_tr, X_te, y_te, device,
     y_pred = (proba > 0.5).astype(int)
     return net, y_pred, proba
 
+
+# ─────────────────────────────────────────────────────────
+# 7. EVALUATION
+# ─────────────────────────────────────────────────────────
 def evaluate(name, y_te, y_pred, y_proba):
     print(f"\n── Results: {name} ────────────────────────")
     print(classification_report(
         y_te, y_pred,
-        target_names=['Survived (0)', 'Died (1)'],
-        zero_division=0
+        target_names=['Survived (0)', 'Died (1)']
     ))
-    cm = confusion_matrix(y_te, y_pred, labels=[0, 1])
+    cm = confusion_matrix(y_te, y_pred)
     print("Confusion Matrix (rows=actual, cols=predicted):")
     print(f"                 Pred:Survived  Pred:Died")
     print(f"  Actual Survived:    {cm[0,0]:5d}        {cm[0,1]:5d}")
     print(f"  Actual Died:        {cm[1,0]:5d}        {cm[1,1]:5d}")
 
-    f1_macro = f1_score(y_te, y_pred, average='macro', zero_division=0)
-    f1_died  = f1_score(y_te, y_pred, pos_label=1, zero_division=0)
+    f1_macro = f1_score(y_te, y_pred, average='macro')
+    f1_died  = f1_score(y_te, y_pred, pos_label=1)
     print(f"F1 (Died class)  : {f1_died:.4f}")
     print(f"F1 (macro avg)   : {f1_macro:.4f}")
 
@@ -468,71 +536,88 @@ def evaluate(name, y_te, y_pred, y_proba):
         "avg_confidence": avg_conf,
     }
 
-def run_fold(fold_info, patient_files, device):
-    fold_id     = fold_info["fold"]
-    train_pids  = fold_info["train_pids"]
-    test_pids   = fold_info["test_pids"]
 
-    print(f"\n\n################## FOLD {fold_id} ##################")
-    print(f"  Test patients (died)     : {fold_info['test_died']}")
-    print(f"  Test patients (survived) : {fold_info['test_survived']}")
-    print(f"  Train patients           : {len(train_pids)}")
+# ─────────────────────────────────────────────────────────
+# 8. MAIN
+# ─────────────────────────────────────────────────────────
+def main():
+    print(f"Device : {DEVICE}\n")
 
-    X_train, y_train, g_train = build_windows_for_patients(
-        patient_files, train_pids, WINDOW_SIZE, STEP_SIZE, tag=f"fold{fold_id}-TRAIN"
-    )
-    X_test, y_test, g_test = build_windows_for_patients(
-        patient_files, test_pids, WINDOW_SIZE, STEP_SIZE, tag=f"fold{fold_id}-TEST"
+    # ── Phase 0: Lowpass-filter every raw CSV and save into FILTERED_DATA_ROOT ──
+    filter_and_save_all_files(
+        DATA_ROOT, FILTERED_DATA_ROOT,
+        order=FILTER_ORDER, cutoff=FILTER_CUTOFF, fs=FILTER_FS,
+        force=FORCE_REFILTER
     )
 
-    assert set(train_pids).isdisjoint(set(test_pids)), \
-        "Leakage: a patient appears in both train and test pid lists!"
+    # ── Load data (now reading from the FILTERED folder): per-chunk holdout
+    #    test window + non-overlapping train windows ──
+    (X_train, y_train, g_train,
+     X_test,  y_test,  g_test,
+     pid_to_idx, pid_labels) = load_all_data(FILTERED_DATA_ROOT, WINDOW_SIZE, STEP_SIZE, RNG)
 
+    # ── Carve a val split out of the TRAIN window pool only (window-wise stratified) ──
     idx = np.arange(len(y_train))
     tr_idx, val_idx = train_test_split(
         idx, test_size=VAL_SIZE, random_state=0, stratify=y_train
     )
+
     X_tr,  y_tr  = X_train[tr_idx],  y_train[tr_idx]
     X_val, y_val = X_train[val_idx], y_train[val_idx]
 
+    print(f"Train windows (CNN fit) : {len(y_tr):,}")
+    print(f"Val   windows           : {len(y_val):,}")
+    print(f"Full-train windows      : {len(y_train):,}")
+    print(f"Test  windows           : {len(y_test):,}\n")
+
     cw = compute_class_weight('balanced', classes=np.array([0, 1]), y=y_tr)
     pos_weight = float(cw[1] / cw[0])
+    print(f"Class weights  : survived={cw[0]:.3f}, died={cw[1]:.3f}")
+    print(f"pos_weight     : {pos_weight:.3f}\n")
 
     train_loader      = DataLoader(EEGDataset(X_tr,  y_tr),  batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
     val_loader        = DataLoader(EEGDataset(X_val, y_val), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     test_loader       = DataLoader(EEGDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     full_train_loader = DataLoader(EEGDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    model = EEG_CNN().to(device)
-    train_cnn(model, train_loader, val_loader, device,
+    model = EEG_CNN().to(DEVICE)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters : {n_params:,}\n")
+
+    train_cnn(model, train_loader, val_loader, DEVICE,
               epochs=EPOCHS, lr=LR, weight_decay=WEIGHT_DECAY,
-              pos_weight=pos_weight, patience=PATIENCE,
-              log_prefix=f"[fold{fold_id}] ")
+              pos_weight=pos_weight, patience=PATIENCE)
 
-    X_tr_feat, y_tr_feat = extract_features(model, full_train_loader, device)
-    X_te_feat, y_te_feat = extract_features(model, test_loader,        device)
+    print("── Phase 2: Extracting CNN features (window-level) ──")
+    X_tr_feat, y_tr_feat = extract_features(model, full_train_loader, DEVICE)
+    X_te_feat, y_te_feat = extract_features(model, test_loader,        DEVICE)
+    print(f"  Train window features : {X_tr_feat.shape}")
+    print(f"  Test  window features : {X_te_feat.shape}\n")
 
-    torch.save(model.state_dict(), SAVE_DIR / f"cnn_fold{fold_id}.pth")
+    torch.save(model.state_dict(), SAVE_MODEL)
 
-    pca = PCA(n_components=min(PCA_COMPONENTS, X_tr_feat.shape[0], X_tr_feat.shape[1]),
-              random_state=42)
+    print(f"── Fitting PCA (n={PCA_COMPONENTS}) ───────")
+    pca = PCA(n_components=PCA_COMPONENTS, random_state=42)
     X_tr_pca = pca.fit_transform(X_tr_feat)
     X_te_pca = pca.transform(X_te_feat)
-    joblib.dump(pca, SAVE_DIR / f"pca_fold{fold_id}.pkl")
+    var = pca.explained_variance_ratio_.sum() * 100
+    print(f"  Explained variance : {var:.1f}%\n")
+    joblib.dump(pca, SAVE_PCA)
 
-    fold_results = {}
+    results = {}
 
     def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_):
-        print(f"\n===== fold{fold_id} / {tag}: SVM =====")
+        print(f"\n========== {tag}: SVM ==========")
         base_svm = SVC(kernel='rbf', C=10.0, gamma='scale',
                         class_weight='balanced', random_state=42)
         svm = CalibratedClassifierCV(base_svm, cv=5, ensemble=False)
         svm.fit(X_tr_, y_tr_)
         y_pred = svm.predict(X_te_)
         y_proba = svm.predict_proba(X_te_)[:, 1]
-        fold_results[f"{tag}_SVM"] = evaluate(f"fold{fold_id} {tag} — SVM", y_te_, y_pred, y_proba)
+        results[f"{tag}_SVM"] = evaluate(f"{tag} — SVM", y_te_, y_pred, y_proba)
+        joblib.dump(svm, SAVE_DIR / f"svm_{tag}.pkl")
 
-        print(f"\n===== fold{fold_id} / {tag}: Random Forest =====")
+        print(f"\n========== {tag}: Random Forest ==========")
         rf = RandomForestClassifier(
             n_estimators=300, max_depth=None, min_samples_leaf=2,
             class_weight='balanced', random_state=42, n_jobs=-1
@@ -540,60 +625,40 @@ def run_fold(fold_info, patient_files, device):
         rf.fit(X_tr_, y_tr_)
         y_pred = rf.predict(X_te_)
         y_proba = rf.predict_proba(X_te_)[:, 1]
-        fold_results[f"{tag}_RF"] = evaluate(f"fold{fold_id} {tag} — Random Forest", y_te_, y_pred, y_proba)
+        results[f"{tag}_RF"] = evaluate(f"{tag} — Random Forest", y_te_, y_pred, y_proba)
+        joblib.dump(rf, SAVE_DIR / f"rf_{tag}.pkl")
 
-        print(f"\n===== fold{fold_id} / {tag}: One-Layer NN =====")
-        nn_model, y_pred, y_proba = train_one_layer_nn(X_tr_, y_tr_, X_te_, y_te_, device)
-        fold_results[f"{tag}_NN"] = evaluate(f"fold{fold_id} {tag} — One-Layer NN", y_te_, y_pred, y_proba)
+        print(f"\n========== {tag}: One-Layer NN ==========")
+        nn_model, y_pred, y_proba = train_one_layer_nn(
+            X_tr_, y_tr_, X_te_, y_te_, DEVICE
+        )
+        results[f"{tag}_NN"] = evaluate(f"{tag} — One-Layer NN", y_te_, y_pred, y_proba)
+        torch.save(nn_model.state_dict(), SAVE_DIR / f"onelayernn_{tag}.pth")
 
     run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat)
     run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat)
 
-    return fold_results
-
-def main():
-    print(f"Device : {DEVICE}\n")
-
-    filter_and_save_all_files(
-        DATA_ROOT, FILTERED_DATA_ROOT,
-        order=FILTER_ORDER, cutoff=FILTER_CUTOFF, fs=FILTER_FS,
-        force=FORCE_REFILTER
-    )
-
-    patient_files, pid_labels = discover_patient_files(FILTERED_DATA_ROOT)
-
-    folds = make_patient_folds(
-        pid_labels, RNG,
-        n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
-        n_died_per_fold=N_DIED_TEST_PER_FOLD,
-    )
-    print(f"Built {len(folds)} fold(s); each test fold = "
-          f"{N_SURVIVED_TEST_PER_FOLD} survived + {N_DIED_TEST_PER_FOLD} died patient(s), "
-          f"fully excluded from that fold's training set.")
-
-    all_fold_results = []
-    for fold_info in folds:
-        fold_results = run_fold(fold_info, patient_files, DEVICE)
-        all_fold_results.append(fold_results)
-
-    print("\n\n========== K-FOLD SUMMARY (mean ± std across folds) ==========")
-    model_keys = sorted(all_fold_results[0].keys())
-    header = f"  {'Model':<14}{'F1(Died)':>16}{'F1(macro)':>16}{'AUC':>16}"
+    print("\n\n========== SUMMARY (held-out per-chunk test windows) ==========")
+    header = f"  {'Model':<14}{'F1(Died)':>10}{'F1(macro)':>11}{'AUC':>8}{'AvgConf':>9}"
     print(header)
     print("  " + "-" * (len(header) - 2))
-    for k in model_keys:
-        f1d = [r[k]['f1_died']  for r in all_fold_results if r[k]['f1_died']  is not None]
-        f1m = [r[k]['f1_macro'] for r in all_fold_results if r[k]['f1_macro'] is not None]
-        auc = [r[k]['auc']      for r in all_fold_results if r[k]['auc']      is not None]
+    for k, r in results.items():
+        f1d   = f"{r['f1_died']:.4f}"   if r['f1_died']   is not None else "N/A"
+        f1m   = f"{r['f1_macro']:.4f}"  if r['f1_macro']  is not None else "N/A"
+        auc   = f"{r['auc']:.4f}"       if r['auc']       is not None else "N/A"
+        conf  = f"{r['avg_confidence']*100:.1f}%" if r['avg_confidence'] is not None else "N/A"
+        print(f"  {k:<14}{f1d:>10}{f1m:>11}{auc:>8}{conf:>9}")
 
-        def fmt(vals):
-            if not vals:
-                return "N/A"
-            return f"{np.mean(vals):.4f}±{np.std(vals):.4f}"
+    print("\n── Confusion matrices ──")
+    for k, r in results.items():
+        cm = r["confusion_matrix"]
+        print(f"\n  {k}")
+        print(f"                 Pred:Survived  Pred:Died")
+        print(f"  Actual Survived:    {cm[0,0]:5d}        {cm[0,1]:5d}")
+        print(f"  Actual Died:        {cm[1,0]:5d}        {cm[1,1]:5d}")
 
-        print(f"  {k:<14}{fmt(f1d):>16}{fmt(f1m):>16}{fmt(auc):>16}")
+    print(f"\nSaved: {SAVE_MODEL}, {SAVE_PCA}, and classifiers in {SAVE_DIR}/")
 
-    print(f"\nPer-fold models/artifacts saved in {SAVE_DIR}/")
 
 if __name__ == "__main__":
     main()

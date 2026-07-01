@@ -1,0 +1,239 @@
+Device : cuda
+
+Folder /0: 1400 CSV files found
+Folder /1: 500 CSV files found
+
+Total unique patients : 95
+  Survived (0) : 70 patients
+  Died     (1) : 25 patients
+  Processed 20/95 patients...
+  Processed 40/95 patients...
+  Processed 60/95 patients...
+  Processed 80/95 patients...
+Skipped files : 0
+Chunks contributing a holdout test window : 1900
+
+── Dataset Summary ──────────────────
+Train windows  : (108530, 256, 16, 1)  (died=27,845, survived=80,685)
+Test  windows  : (1900, 256, 16, 1)  (died=500, survived=1,400)
+─────────────────────────────────────
+
+Train windows (CNN fit) : 92,250
+Val   windows           : 16,280
+Full-train windows      : 108,530
+Test  windows           : 1,900
+
+Class weights  : survived=0.673, died=1.949
+pos_weight     : 2.898
+
+Model parameters : 1,137,921
+
+── Phase 1: Training CNN ─────────────
+  Epoch [01/25]  Train Loss: 0.9763 Acc: 62.2%  |  Val Loss: 0.8100 Acc: 68.5%
+  Epoch [02/25]  Train Loss: 0.7659 Acc: 73.3%  |  Val Loss: 0.6279 Acc: 84.1%
+  Epoch [03/25]  Train Loss: 0.6220 Acc: 80.1%  |  Val Loss: 0.5597 Acc: 85.2%
+  Epoch [04/25]  Train Loss: 0.5438 Acc: 83.3%  |  Val Loss: 0.4809 Acc: 91.2%
+  Epoch [05/25]  Train Loss: 0.4902 Acc: 85.8%  |  Val Loss: 0.4342 Acc: 91.9%
+  Epoch [06/25]  Train Loss: 0.4398 Acc: 87.3%  |  Val Loss: 0.3675 Acc: 93.7%
+  Epoch [07/25]  Train Loss: 0.4034 Acc: 88.6%  |  Val Loss: 0.3164 Acc: 92.6%
+  Epoch [08/25]  Train Loss: 0.3788 Acc: 89.3%  |  Val Loss: 0.2871 Acc: 95.1%
+  Epoch [09/25]  Train Loss: 0.3521 Acc: 90.2%  |  Val Loss: 0.2434 Acc: 94.1%
+  Epoch [10/25]  Train Loss: 0.3337 Acc: 90.8%  |  Val Loss: 0.2414 Acc: 95.2%
+  Epoch [11/25]  Train Loss: 0.3237 Acc: 91.2%  |  Val Loss: 0.2404 Acc: 95.8%
+  Epoch [12/25]  Train Loss: 0.3106 Acc: 91.7%  |  Val Loss: 0.2281 Acc: 95.7%
+  Epoch [13/25]  Train Loss: 0.2952 Acc: 92.1%  |  Val Loss: 0.2203 Acc: 96.4%
+  Epoch [14/25]  Train Loss: 0.2866 Acc: 92.5%  |  Val Loss: 0.1903 Acc: 96.3%
+  Epoch [15/25]  Train Loss: 0.2676 Acc: 92.9%  |  Val Loss: 0.1695 Acc: 96.8%
+  Epoch [16/25]  Train Loss: 0.2600 Acc: 93.1%  |  Val Loss: 0.1656 Acc: 96.7%
+  Epoch [17/25]  Train Loss: 0.2556 Acc: 93.4%  |  Val Loss: 0.1565 Acc: 95.8%
+  Epoch [18/25]  Train Loss: 0.2497 Acc: 93.4%  |  Val Loss: 0.1528 Acc: 97.0%
+  Epoch [19/25]  Train Loss: 0.2427 Acc: 93.6%  |  Val Loss: 0.1417 Acc: 97.2%
+  Epoch [20/25]  Train Loss: 0.2382 Acc: 93.9%  |  Val Loss: 0.1589 Acc: 97.1%
+    (no meaningful improvement: 1/7)
+  Epoch [21/25]  Train Loss: 0.2316 Acc: 93.9%  |  Val Loss: 0.1257 Acc: 97.2%
+  Epoch [22/25]  Train Loss: 0.2263 Acc: 94.1%  |  Val Loss: 0.1246 Acc: 97.0%
+  Epoch [23/25]  Train Loss: 0.2223 Acc: 94.3%  |  Val Loss: 0.1386 Acc: 97.0%
+    (no meaningful improvement: 1/7)
+  Epoch [24/25]  Train Loss: 0.2158 Acc: 94.3%  |  Val Loss: 0.1233 Acc: 96.8%
+  Epoch [25/25]  Train Loss: 0.2158 Acc: 94.4%  |  Val Loss: 0.1258 Acc: 97.3%
+    (no meaningful improvement: 1/7)
+  Best val loss: 0.1233
+
+── Phase 2: Extracting CNN features (window-level) ──
+  Train window features : (108530, 128)
+  Test  window features : (1900, 128)
+
+── Fitting PCA (n=32) ───────
+  Explained variance : 99.9%
+
+
+========== RAW: SVM ==========
+
+── Results: RAW — SVM ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.99      0.97      0.98      1400
+    Died (1)       0.92      0.96      0.94       500
+
+    accuracy                           0.97      1900
+   macro avg       0.95      0.97      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1359           41
+  Actual Died:           20          480
+F1 (Died class)  : 0.9403
+F1 (macro avg)   : 0.9592
+ROC-AUC          : 0.9857
+Avg confidence   : 97.5%  (mean predicted-class probability)
+
+========== RAW: Random Forest ==========
+
+── Results: RAW — Random Forest ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.98      0.98      0.98      1400
+    Died (1)       0.94      0.95      0.95       500
+
+    accuracy                           0.97      1900
+   macro avg       0.96      0.97      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1370           30
+  Actual Died:           23          477
+F1 (Died class)  : 0.9474
+F1 (macro avg)   : 0.9642
+ROC-AUC          : 0.9931
+Avg confidence   : 97.4%  (mean predicted-class probability)
+
+========== RAW: One-Layer NN ==========
+
+── Results: RAW — One-Layer NN ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.99      0.97      0.98      1400
+    Died (1)       0.92      0.96      0.94       500
+
+    accuracy                           0.97      1900
+   macro avg       0.95      0.96      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1356           44
+  Actual Died:           20          480
+F1 (Died class)  : 0.9375
+F1 (macro avg)   : 0.9572
+ROC-AUC          : 0.9935
+Avg confidence   : 97.5%  (mean predicted-class probability)
+
+========== PCA: SVM ==========
+
+── Results: PCA — SVM ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.98      0.97      0.98      1400
+    Died (1)       0.92      0.95      0.94       500
+
+    accuracy                           0.97      1900
+   macro avg       0.95      0.96      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1359           41
+  Actual Died:           23          477
+F1 (Died class)  : 0.9371
+F1 (macro avg)   : 0.9571
+ROC-AUC          : 0.9835
+Avg confidence   : 97.5%  (mean predicted-class probability)
+
+========== PCA: Random Forest ==========
+
+── Results: PCA — Random Forest ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.98      0.98      0.98      1400
+    Died (1)       0.94      0.95      0.95       500
+
+    accuracy                           0.97      1900
+   macro avg       0.96      0.97      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1370           30
+  Actual Died:           24          476
+F1 (Died class)  : 0.9463
+F1 (macro avg)   : 0.9635
+ROC-AUC          : 0.9938
+Avg confidence   : 97.4%  (mean predicted-class probability)
+
+========== PCA: One-Layer NN ==========
+
+── Results: PCA — One-Layer NN ────────────────────────
+              precision    recall  f1-score   support
+
+Survived (0)       0.98      0.97      0.98      1400
+    Died (1)       0.92      0.95      0.94       500
+
+    accuracy                           0.97      1900
+   macro avg       0.95      0.96      0.96      1900
+weighted avg       0.97      0.97      0.97      1900
+
+Confusion Matrix (rows=actual, cols=predicted):
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1360           40
+  Actual Died:           23          477
+F1 (Died class)  : 0.9381
+F1 (macro avg)   : 0.9577
+ROC-AUC          : 0.9936
+Avg confidence   : 97.4%  (mean predicted-class probability)
+
+
+========== SUMMARY (held-out per-chunk test windows) ==========
+  Model           F1(Died)  F1(macro)     AUC  AvgConf
+  ----------------------------------------------------
+  RAW_SVM           0.9403     0.9592  0.9857    97.5%
+  RAW_RF            0.9474     0.9642  0.9931    97.4%
+  RAW_NN            0.9375     0.9572  0.9935    97.5%
+  PCA_SVM           0.9371     0.9571  0.9835    97.5%
+  PCA_RF            0.9463     0.9635  0.9938    97.4%
+  PCA_NN            0.9381     0.9577  0.9936    97.4%
+
+── Confusion matrices ──
+
+  RAW_SVM
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1359           41
+  Actual Died:           20          480
+
+  RAW_RF
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1370           30
+  Actual Died:           23          477
+
+  RAW_NN
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1356           44
+  Actual Died:           20          480
+
+  PCA_SVM
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1359           41
+  Actual Died:           23          477
+
+  PCA_RF
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1370           30
+  Actual Died:           24          476
+
+  PCA_NN
+                 Pred:Survived  Pred:Died
+  Actual Survived:     1360           40
+  Actual Died:           23          477
+
+Saved: eeg_cnn_v4.pth, eeg_pca_v4.pkl, and classifiers in models_v4/

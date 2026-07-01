@@ -44,7 +44,7 @@ from sklearn.metrics import (
 # ─────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────
-DATA_ROOT      = Path(r"C:\abalaji\bichat\ORIGINAL_DATA\chunks_20")
+DATA_ROOT      = Path(r"D:\abalaji\chunks_20")
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
 STEP_SIZE      = 128
