@@ -45,6 +45,7 @@ FILTER_FS      = 256.0
 
 N_SURVIVED_TEST_PER_FOLD = 3
 N_DIED_TEST_PER_FOLD     = 1
+N_FOLDS                  = 5
 
 SAVE_DIR       = Path("models_v5_kfold")
 SAVE_DIR.mkdir(exist_ok=True)
@@ -151,7 +152,8 @@ def discover_patient_files(data_root):
 
 def make_patient_folds(pid_labels, rng,
                         n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
-                        n_died_per_fold=N_DIED_TEST_PER_FOLD):
+                        n_died_per_fold=N_DIED_TEST_PER_FOLD,
+                        n_folds=N_FOLDS):
     died_pids     = [pid for pid, lbl in pid_labels.items() if lbl == 1]
     survived_pids = [pid for pid, lbl in pid_labels.items() if lbl == 0]
 
@@ -169,7 +171,8 @@ def make_patient_folds(pid_labels, rng,
     died_pids     = rng.permutation(np.array(died_pids)).tolist()
     survived_pids = rng.permutation(np.array(survived_pids)).tolist()
 
-    n_folds = len(died_pids) // n_died_per_fold
+    max_died_folds = len(died_pids) // n_died_per_fold
+    n_folds = min(n_folds, max_died_folds)
     all_pids = set(pid_labels.keys())
 
     folds = []
@@ -566,6 +569,7 @@ def main():
         pid_labels, RNG,
         n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
         n_died_per_fold=N_DIED_TEST_PER_FOLD,
+        n_folds=N_FOLDS,
     )
     print(f"Built {len(folds)} fold(s); each test fold = "
           f"{N_SURVIVED_TEST_PER_FOLD} survived + {N_DIED_TEST_PER_FOLD} died patient(s), "
