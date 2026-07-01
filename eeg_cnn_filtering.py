@@ -15,7 +15,7 @@ from sklearn.decomposition import PCA
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import (
@@ -40,17 +40,15 @@ RANDOM_SEED    = 42
 DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 FILTER_ORDER   = 4
-FILTER_CUTOFF  = 40.0
+FILTER_CUTOFF  = 100.0
 FILTER_FS      = 256.0
 
-N_SURVIVED_TEST_PER_FOLD = 3
-N_DIED_TEST_PER_FOLD     = 1
-N_FOLDS                  = 5
+N_HELDOUT_SURVIVED = 3
+N_HELDOUT_DIED      = 1
+N_CV_FOLDS          = 5
 
 SAVE_DIR       = Path("models_v5_kfold")
 SAVE_DIR.mkdir(exist_ok=True)
-
-RNG = np.random.default_rng(RANDOM_SEED)
 
 def butter_lowpass_filter(signal, order, cutoff, fs):
     signal = pd.to_numeric(signal, errors='coerce').to_numpy(dtype=np.float64) \
@@ -150,48 +148,55 @@ def discover_patient_files(data_root):
 
     return patient_files, pid_labels
 
-def make_patient_folds(pid_labels, rng,
-                        n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
-                        n_died_per_fold=N_DIED_TEST_PER_FOLD,
-                        n_folds=N_FOLDS):
+def make_holdout_split(pid_labels, n_heldout_survived=N_HELDOUT_SURVIVED,
+                        n_heldout_died=N_HELDOUT_DIED, random_state=RANDOM_SEED):
+    rng = np.random.default_rng(random_state)
+
     died_pids     = [pid for pid, lbl in pid_labels.items() if lbl == 1]
     survived_pids = [pid for pid, lbl in pid_labels.items() if lbl == 0]
 
-    if len(died_pids) < n_died_per_fold:
+    if len(died_pids) < n_heldout_died:
         raise ValueError(
-            f"Need at least {n_died_per_fold} died patient(s) to form a fold; "
+            f"Need at least {n_heldout_died} died patient(s) for the holdout test set; "
             f"found {len(died_pids)}."
         )
-    if len(survived_pids) < n_survived_per_fold:
+    if len(survived_pids) < n_heldout_survived:
         raise ValueError(
-            f"Need at least {n_survived_per_fold} survived patient(s) to form a fold; "
+            f"Need at least {n_heldout_survived} survived patient(s) for the holdout test set; "
             f"found {len(survived_pids)}."
         )
 
     died_pids     = rng.permutation(np.array(died_pids)).tolist()
     survived_pids = rng.permutation(np.array(survived_pids)).tolist()
 
-    max_died_folds = len(died_pids) // n_died_per_fold
-    n_folds = min(n_folds, max_died_folds)
-    all_pids = set(pid_labels.keys())
+    test_died     = died_pids[:n_heldout_died]
+    test_survived = survived_pids[:n_heldout_survived]
+    test_pids     = sorted(test_died + test_survived)
+
+    all_pids   = set(pid_labels.keys())
+    train_pool_pids = sorted(all_pids - set(test_pids))
+
+    return train_pool_pids, test_pids, test_died, test_survived
+
+def make_patient_folds(pid_labels, pids, n_folds=N_CV_FOLDS, random_state=RANDOM_SEED):
+    pids   = np.array(sorted(pids))
+    labels = np.array([pid_labels[pid] for pid in pids])
+
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
 
     folds = []
-    for i in range(n_folds):
-        test_died = died_pids[i * n_died_per_fold:(i + 1) * n_died_per_fold]
-
-        start = (i * n_survived_per_fold) % len(survived_pids)
-        surv_idx = [(start + j) % len(survived_pids) for j in range(n_survived_per_fold)]
-        test_survived = [survived_pids[j] for j in surv_idx]
-
-        test_pids  = set(test_died) | set(test_survived)
-        train_pids = all_pids - test_pids
+    for i, (train_idx, val_idx) in enumerate(skf.split(pids, labels)):
+        train_pids = sorted(pids[train_idx].tolist())
+        val_pids   = sorted(pids[val_idx].tolist())
+        val_died     = sorted([pid for pid in val_pids if pid_labels[pid] == 1])
+        val_survived = sorted([pid for pid in val_pids if pid_labels[pid] == 0])
 
         folds.append({
             "fold": i,
-            "train_pids": sorted(train_pids),
-            "test_pids":  sorted(test_pids),
-            "test_died":  test_died,
-            "test_survived": test_survived,
+            "train_pids": train_pids,
+            "test_pids":  val_pids,
+            "test_died":  val_died,
+            "test_survived": val_survived,
         })
 
     return folds
@@ -471,21 +476,16 @@ def evaluate(name, y_te, y_pred, y_proba):
         "avg_confidence": avg_conf,
     }
 
-def run_fold(fold_info, patient_files, device):
-    fold_id     = fold_info["fold"]
-    train_pids  = fold_info["train_pids"]
-    test_pids   = fold_info["test_pids"]
-
-    print(f"\n\n################## FOLD {fold_id} ##################")
-    print(f"  Test patients (died)     : {fold_info['test_died']}")
-    print(f"  Test patients (survived) : {fold_info['test_survived']}")
-    print(f"  Train patients           : {len(train_pids)}")
+def run_split(train_pids, test_pids, patient_files, device, run_tag):
+    print(f"\n\n################## {run_tag} ##################")
+    print(f"  Train patients : {len(train_pids)}")
+    print(f"  Test  patients : {len(test_pids)}")
 
     X_train, y_train, g_train = build_windows_for_patients(
-        patient_files, train_pids, WINDOW_SIZE, STEP_SIZE, tag=f"fold{fold_id}-TRAIN"
+        patient_files, train_pids, WINDOW_SIZE, STEP_SIZE, tag=f"{run_tag}-TRAIN"
     )
     X_test, y_test, g_test = build_windows_for_patients(
-        patient_files, test_pids, WINDOW_SIZE, STEP_SIZE, tag=f"fold{fold_id}-TEST"
+        patient_files, test_pids, WINDOW_SIZE, STEP_SIZE, tag=f"{run_tag}-TEST"
     )
 
     assert set(train_pids).isdisjoint(set(test_pids)), \
@@ -510,32 +510,33 @@ def run_fold(fold_info, patient_files, device):
     train_cnn(model, train_loader, val_loader, device,
               epochs=EPOCHS, lr=LR, weight_decay=WEIGHT_DECAY,
               pos_weight=pos_weight, patience=PATIENCE,
-              log_prefix=f"[fold{fold_id}] ")
+              log_prefix=f"[{run_tag}] ")
 
     X_tr_feat, y_tr_feat = extract_features(model, full_train_loader, device)
     X_te_feat, y_te_feat = extract_features(model, test_loader,        device)
 
-    torch.save(model.state_dict(), SAVE_DIR / f"cnn_fold{fold_id}.pth")
+    torch.save(model.state_dict(), SAVE_DIR / f"cnn_{run_tag}.pth")
 
     pca = PCA(n_components=min(PCA_COMPONENTS, X_tr_feat.shape[0], X_tr_feat.shape[1]),
               random_state=42)
     X_tr_pca = pca.fit_transform(X_tr_feat)
     X_te_pca = pca.transform(X_te_feat)
-    joblib.dump(pca, SAVE_DIR / f"pca_fold{fold_id}.pkl")
+    joblib.dump(pca, SAVE_DIR / f"pca_{run_tag}.pkl")
 
-    fold_results = {}
+    split_results = {}
 
     def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_):
-        print(f"\n===== fold{fold_id} / {tag}: SVM =====")
+        print(f"\n===== {run_tag} / {tag}: SVM =====")
         base_svm = SVC(kernel='rbf', C=10.0, gamma='scale',
                         class_weight='balanced', random_state=42)
         svm = CalibratedClassifierCV(base_svm, cv=5, ensemble=False)
         svm.fit(X_tr_, y_tr_)
         y_pred = svm.predict(X_te_)
         y_proba = svm.predict_proba(X_te_)[:, 1]
-        fold_results[f"{tag}_SVM"] = evaluate(f"fold{fold_id} {tag} — SVM", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_SVM"] = evaluate(f"{run_tag} {tag} — SVM", y_te_, y_pred, y_proba)
+        joblib.dump(svm, SAVE_DIR / f"svm_{tag}_{run_tag}.pkl")
 
-        print(f"\n===== fold{fold_id} / {tag}: Random Forest =====")
+        print(f"\n===== {run_tag} / {tag}: Random Forest =====")
         rf = RandomForestClassifier(
             n_estimators=300, max_depth=None, min_samples_leaf=2,
             class_weight='balanced', random_state=42, n_jobs=-1
@@ -543,16 +544,18 @@ def run_fold(fold_info, patient_files, device):
         rf.fit(X_tr_, y_tr_)
         y_pred = rf.predict(X_te_)
         y_proba = rf.predict_proba(X_te_)[:, 1]
-        fold_results[f"{tag}_RF"] = evaluate(f"fold{fold_id} {tag} — Random Forest", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_RF"] = evaluate(f"{run_tag} {tag} — Random Forest", y_te_, y_pred, y_proba)
+        joblib.dump(rf, SAVE_DIR / f"rf_{tag}_{run_tag}.pkl")
 
-        print(f"\n===== fold{fold_id} / {tag}: One-Layer NN =====")
+        print(f"\n===== {run_tag} / {tag}: One-Layer NN =====")
         nn_model, y_pred, y_proba = train_one_layer_nn(X_tr_, y_tr_, X_te_, y_te_, device)
-        fold_results[f"{tag}_NN"] = evaluate(f"fold{fold_id} {tag} — One-Layer NN", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_NN"] = evaluate(f"{run_tag} {tag} — One-Layer NN", y_te_, y_pred, y_proba)
+        torch.save(nn_model.state_dict(), SAVE_DIR / f"onelayernn_{tag}_{run_tag}.pth")
 
     run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat)
     run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat)
 
-    return fold_results
+    return split_results
 
 def main():
     print(f"Device : {DEVICE}\n")
@@ -565,30 +568,37 @@ def main():
 
     patient_files, pid_labels = discover_patient_files(FILTERED_DATA_ROOT)
 
-    folds = make_patient_folds(
-        pid_labels, RNG,
-        n_survived_per_fold=N_SURVIVED_TEST_PER_FOLD,
-        n_died_per_fold=N_DIED_TEST_PER_FOLD,
-        n_folds=N_FOLDS,
+    train_pool_pids, holdout_pids, holdout_died, holdout_survived = make_holdout_split(
+        pid_labels,
+        n_heldout_survived=N_HELDOUT_SURVIVED,
+        n_heldout_died=N_HELDOUT_DIED,
+        random_state=RANDOM_SEED,
     )
-    print(f"Built {len(folds)} fold(s); each test fold = "
-          f"{N_SURVIVED_TEST_PER_FOLD} survived + {N_DIED_TEST_PER_FOLD} died patient(s), "
-          f"fully excluded from that fold's training set.")
+    print(f"Held-out TEST patients (excluded from all training/CV): {holdout_pids}")
+    print(f"  died     : {holdout_died}")
+    print(f"  survived : {holdout_survived}")
+    print(f"Remaining patients for CV + final training: {len(train_pool_pids)}\n")
 
-    all_fold_results = []
-    for fold_info in folds:
-        fold_results = run_fold(fold_info, patient_files, DEVICE)
-        all_fold_results.append(fold_results)
+    cv_folds = make_patient_folds(pid_labels, train_pool_pids, n_folds=N_CV_FOLDS, random_state=RANDOM_SEED)
+    print(f"Built {len(cv_folds)} StratifiedKFold CV fold(s) (n_splits={N_CV_FOLDS}) "
+          f"on the {len(train_pool_pids)} non-held-out patients.")
 
-    print("\n\n========== K-FOLD SUMMARY (mean ± std across folds) ==========")
-    model_keys = sorted(all_fold_results[0].keys())
+    cv_results = []
+    for fold_info in cv_folds:
+        run_tag = f"cv_fold{fold_info['fold']}"
+        results = run_split(fold_info["train_pids"], fold_info["test_pids"],
+                             patient_files, DEVICE, run_tag)
+        cv_results.append(results)
+
+    print("\n\n========== CV SUMMARY on train pool (mean ± std across folds) ==========")
+    model_keys = sorted(cv_results[0].keys())
     header = f"  {'Model':<14}{'F1(Died)':>16}{'F1(macro)':>16}{'AUC':>16}"
     print(header)
     print("  " + "-" * (len(header) - 2))
     for k in model_keys:
-        f1d = [r[k]['f1_died']  for r in all_fold_results if r[k]['f1_died']  is not None]
-        f1m = [r[k]['f1_macro'] for r in all_fold_results if r[k]['f1_macro'] is not None]
-        auc = [r[k]['auc']      for r in all_fold_results if r[k]['auc']      is not None]
+        f1d = [r[k]['f1_died']  for r in cv_results if r[k]['f1_died']  is not None]
+        f1m = [r[k]['f1_macro'] for r in cv_results if r[k]['f1_macro'] is not None]
+        auc = [r[k]['auc']      for r in cv_results if r[k]['auc']      is not None]
 
         def fmt(vals):
             if not vals:
@@ -597,7 +607,30 @@ def main():
 
         print(f"  {k:<14}{fmt(f1d):>16}{fmt(f1m):>16}{fmt(auc):>16}")
 
-    print(f"\nPer-fold models/artifacts saved in {SAVE_DIR}/")
+    print("\n\n========== FINAL MODEL: trained on full train pool, "
+          "evaluated on held-out TEST patients ==========")
+    final_results = run_split(train_pool_pids, holdout_pids, patient_files, DEVICE, "FINAL_HOLDOUT")
+
+    print("\n\n========== HELD-OUT TEST SET — FINAL SCORES ==========")
+    header = f"  {'Model':<14}{'F1(Died)':>12}{'F1(macro)':>12}{'AUC':>10}{'AvgConf':>10}"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for k, r in final_results.items():
+        f1d  = f"{r['f1_died']:.4f}"   if r['f1_died']   is not None else "N/A"
+        f1m  = f"{r['f1_macro']:.4f}"  if r['f1_macro']  is not None else "N/A"
+        auc  = f"{r['auc']:.4f}"       if r['auc']       is not None else "N/A"
+        conf = f"{r['avg_confidence']*100:.1f}%" if r['avg_confidence'] is not None else "N/A"
+        print(f"  {k:<14}{f1d:>12}{f1m:>12}{auc:>10}{conf:>10}")
+
+    print("\n── Held-out test set confusion matrices ──")
+    for k, r in final_results.items():
+        cm = r["confusion_matrix"]
+        print(f"\n  {k}")
+        print(f"                 Pred:Survived  Pred:Died")
+        print(f"  Actual Survived:    {cm[0,0]:5d}        {cm[0,1]:5d}")
+        print(f"  Actual Died:        {cm[1,0]:5d}        {cm[1,1]:5d}")
+
+    print(f"\nModels/artifacts saved in {SAVE_DIR}/")
 
 if __name__ == "__main__":
     main()
