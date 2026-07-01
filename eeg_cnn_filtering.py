@@ -22,9 +22,13 @@ from sklearn.metrics import (
     classification_report, confusion_matrix, roc_auc_score, f1_score
 )
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+logger = logging.getLogger("eeg cnn")
+logger.info("START")
+
 DATA_ROOT          = Path(r"D:\abalaji\chunks_20")
 FILTERED_DATA_ROOT  = Path(r"D:\abalaji\chunks_20_filtered")
-FORCE_REFILTER      = True
+FORCE_REFILTER      = False
 
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
