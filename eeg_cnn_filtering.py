@@ -70,7 +70,7 @@ DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Lowpass filter settings
 FILTER_ORDER   = 4
-FILTER_CUTOFF  = 40.0     # Hz
+FILTER_CUTOFF  = 100.0     # Hz
 FILTER_FS      = 256.0    # Hz — sampling rate of the EEG signal; adjust to your actual fs
 
 SAVE_MODEL     = "eeg_cnn_v5.pth"
