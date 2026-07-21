@@ -1,24 +1,3 @@
-"""
-EEG Death vs No-Death Classification — v3 (window-wise split, multi-classifier)
-CNN → Flatten/FC(128) features → {SVM, RandomForest, 1-layer NN} × {with PCA, without PCA}
-
-Changes vs v2:
-  - Patient-level split.
-  - 6 classifier variants:
-        SVM        (raw features)
-        SVM        (PCA features)
-        RandomForest (raw features)
-        RandomForest (PCA features)
-        1-layer NN (raw features)
-        1-layer NN (PCA features)
-  - Metrics for all 6 on the held-out window test set.
-
-Folder structure:
-  chunks_20/0/  ← survived  (1214_chunk_000.csv ...)
-  chunks_20/1/  ← died      (2045_chunk_000.csv ...)
-Each CSV: (15361, 17) — header row + 16 EEG cols + 1 extra col (dropped)
-"""
-
 import re
 import numpy as np
 import pandas as pd
@@ -41,31 +20,57 @@ from sklearn.metrics import (
     classification_report, confusion_matrix, roc_auc_score, f1_score
 )
 
-# ─────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────
-DATA_ROOT      = Path(r"D:\abalaji\chunks_20")
+DATA_ROOT      = Path(r"C:\abalaji\bichat\ORIGINAL_DATA\chunks_20")
 N_CHANNELS     = 16
-WINDOW_SIZE    = 256
-STEP_SIZE      = 128
-BATCH_SIZE     = 64
-EPOCHS         = 50
-LR            = 5e-4
+GRID_SIZE      = 16
+WINDOW_SIZE    = 4096
+STEP_SIZE      = 4096
+BATCH_SIZE     = 32
+EPOCHS         = 25
+LR             = 5e-4
 WEIGHT_DECAY   = 1e-4
 PCA_COMPONENTS = 32
 PATIENCE       = 7
 TEST_SIZE      = 0.2
 DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-SAVE_MODEL     = "eeg_cnn_v3.pth"
-SAVE_PCA       = "eeg_pca_v3.pkl"
-SAVE_DIR       = Path("models_v3")
+SAVE_MODEL     = "eeg_cnn3d_v4.pth"
+SAVE_PCA       = "eeg_pca_v4.pkl"
+SAVE_DIR       = Path("models_v4")
 SAVE_DIR.mkdir(exist_ok=True)
 
+CHANNEL_ORDER = ['Fp1', 'C3', 'P3', 'O1', 'F7', 'T3', 'T5', 'Cz',
+                  'Pz', 'Fp2', 'C4', 'P4', 'O2', 'F8', 'T4', 'T6']
 
-# ─────────────────────────────────────────────────────────
-# 1. DATA LOADING
-# ─────────────────────────────────────────────────────────
+MONTAGE = {
+    'Fp1': (2, 6),
+    'C3':  (6, 5),
+    'P3':  (8, 5),
+    'O1':  (10, 7),
+    'F7':  (4, 3),
+    'T3':  (7, 5),
+    'T5':  (7, 4),
+    'Cz':  (6, 7),
+    'Pz':  (8, 7),
+    'Fp2': (2, 8),
+    'C4':  (6, 9),
+    'P4':  (8, 9),
+    'O2':  (10, 8),
+    'F8':  (4, 11),
+    'T4':  (7, 9),
+    'T6':  (7, 10),
+}
+
+assert len(CHANNEL_ORDER) == N_CHANNELS
+assert set(CHANNEL_ORDER) == set(MONTAGE.keys())
+
+SCATTER = np.zeros((N_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
+for i, ch in enumerate(CHANNEL_ORDER):
+    r, c = MONTAGE[ch]
+    SCATTER[i, r, c] = 1.0
+SCATTER_T = torch.tensor(SCATTER, dtype=torch.float32)
+
+
 def parse_filename(filename):
     match = re.match(r"(\d+)_chunk_(\d+)\.csv", filename)
     if match:
@@ -142,63 +147,60 @@ def load_all_data(data_root, window_size, step_size):
     X      = np.concatenate(all_windows, axis=0)
     y      = np.concatenate(all_labels,  axis=0)
     groups = np.array(all_groups)
-    X      = X[..., np.newaxis]                    # (N, 256, 16, 1)
 
     print(f"\n── Dataset Summary ──────────────────")
-    print(f"X shape            : {X.shape}")
-    print(f"Windows (died=1)   : {(y==1).sum():,}")
-    print(f"Windows (alive=0)  : {(y==0).sum():,}")
-    print(f"Class ratio 1/0    : {(y==1).sum()/(y==0).sum():.3f}")
+    print(f"X shape (raw window)  : {X.shape}")
+    print(f"Windows (died=1)      : {(y==1).sum():,}")
+    print(f"Windows (alive=0)     : {(y==0).sum():,}")
+    print(f"Class ratio 1/0       : {(y==1).sum()/(y==0).sum():.3f}")
     print(f"─────────────────────────────────────\n")
 
     return X, y, groups, pid_to_idx, pid_labels
 
 
-# ─────────────────────────────────────────────────────────
-# 2. PYTORCH DATASET
-# ─────────────────────────────────────────────────────────
-class EEGDataset(Dataset):
-    def __init__(self, X, y):
-        X_t = np.transpose(X, (0, 3, 1, 2))         # (N, 1, 256, 16)
-        self.X = torch.tensor(X_t, dtype=torch.float32)
-        self.y = torch.tensor(y,   dtype=torch.float32)
+class EEGGridDataset(Dataset):
+    def __init__(self, X, y, scatter):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32)
+        self.scatter = scatter
 
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        window = self.X[idx]
+        grid = torch.einsum('tc,chw->thw', window, self.scatter)
+        grid = grid.unsqueeze(0)
+        return grid, self.y[idx]
 
 
-# ─────────────────────────────────────────────────────────
-# 3. CNN FEATURE EXTRACTOR
-# ─────────────────────────────────────────────────────────
-class ConvBlock(nn.Module):
+class ConvBlock3D(nn.Module):
     def __init__(self, in_ch, out_ch=32):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_ch),
+            nn.Conv3d(in_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm3d(out_ch),
             nn.ReLU(inplace=True),
-            nn.Dropout2d(0.2),
-            nn.MaxPool2d(2, 2)
+            nn.Dropout3d(0.2),
+            nn.MaxPool3d(kernel_size=2, stride=2)
         )
 
     def forward(self, x):
         return self.block(x)
 
 
-class EEG_CNN(nn.Module):
+class EEG_CNN3D(nn.Module):
     def __init__(self):
         super().__init__()
         self.features = nn.Sequential(
-            ConvBlock(1,  32),   # → (32, 128, 8)
-            ConvBlock(32, 64),   # → (64,  64, 4)
-            ConvBlock(64, 64),   # → (64,  32, 2)
+            ConvBlock3D(1,  32),
+            ConvBlock3D(32, 64),
+            ConvBlock3D(64, 64),
         )
+        self.pool = nn.AdaptiveAvgPool3d((4, 2, 2))  # squash depth to a fixed 4, keep H/W at 2x2
         self.flatten = nn.Flatten()
         self.fc = nn.Sequential(
-            nn.Linear(64 * 32 * 2, 256),
+            nn.Linear(64 * 4 * 2 * 2, 256),   # 1024 -> 256
             nn.ReLU(inplace=True),
             nn.Dropout(0.6),
             nn.Linear(256, 128),
@@ -209,17 +211,15 @@ class EEG_CNN(nn.Module):
 
     def forward_features(self, x):
         x = self.features(x)
+        x = self.pool(x)
         x = self.flatten(x)
         x = self.fc(x)
-        return x                        # (batch, 128)
+        return x
 
     def forward(self, x):
         return self.head(self.forward_features(x))
 
 
-# ─────────────────────────────────────────────────────────
-# 4. CNN TRAINING (with internal val split, early stopping)
-# ─────────────────────────────────────────────────────────
 def train_cnn(model, train_loader, val_loader, device,
               epochs, lr, weight_decay, pos_weight, patience, min_delta=1e-3):
 
@@ -235,7 +235,7 @@ def train_cnn(model, train_loader, val_loader, device,
     best_state    = None
     no_improve    = 0
 
-    print("── Phase 1: Training CNN ─────────────")
+    print("── Phase 1: Training 3D CNN ─────────────")
     for epoch in range(1, epochs + 1):
         model.train()
         tr_loss, tr_correct, tr_total = 0.0, 0, 0
@@ -293,9 +293,6 @@ def train_cnn(model, train_loader, val_loader, device,
     print(f"  Best val loss: {best_val_loss:.4f}\n")
 
 
-# ─────────────────────────────────────────────────────────
-# 5. FEATURE EXTRACTION
-# ─────────────────────────────────────────────────────────
 def extract_features(model, loader, device):
     model.eval()
     feats, labels = [], []
@@ -307,12 +304,7 @@ def extract_features(model, loader, device):
     return np.concatenate(feats), np.concatenate(labels)
 
 
-# ─────────────────────────────────────────────────────────
-# 6. ONE-LAYER NN CLASSIFIER (single linear layer + sigmoid)
-# ─────────────────────────────────────────────────────────
 class OneLayerNN(nn.Module):
-    """A single linear layer mapping features -> 1 logit (i.e. logistic regression
-    expressed as a 1-layer neural net), trained with BCEWithLogitsLoss."""
     def __init__(self, in_dim):
         super().__init__()
         self.linear = nn.Linear(in_dim, 1)
@@ -356,9 +348,6 @@ def train_one_layer_nn(X_tr, y_tr, X_te, y_te, device,
     return net, y_pred, proba
 
 
-# ─────────────────────────────────────────────────────────
-# 7. EVALUATION HELPER
-# ─────────────────────────────────────────────────────────
 def evaluate(name, y_te, y_pred, y_proba):
     print(f"\n── Results: {name} ────────────────────────")
     print(classification_report(
@@ -383,7 +372,6 @@ def evaluate(name, y_te, y_pred, y_proba):
 
     avg_conf = None
     if y_proba is not None:
-        # "confidence" = mean predicted probability assigned to the predicted class
         conf_per_sample = np.where(y_pred == 1, y_proba, 1 - y_proba)
         avg_conf = conf_per_sample.mean()
         print(f"Avg confidence   : {avg_conf*100:.1f}%  "
@@ -398,21 +386,18 @@ def evaluate(name, y_te, y_pred, y_proba):
     }
 
 
-# ─────────────────────────────────────────────────────────
-# 8. MAIN
-# ─────────────────────────────────────────────────────────
 def main():
     print(f"Device : {DEVICE}\n")
+    print("CHANNEL_ORDER assumed to match CSV column order — verify before training:")
+    print(f"  {CHANNEL_ORDER}\n")
 
     X, y, groups, pid_to_idx, pid_labels = load_all_data(
         DATA_ROOT, WINDOW_SIZE, STEP_SIZE
     )
 
-    # ── PATIENT-WISE split via GroupShuffleSplit (no patient appears in both train & test) ──
     gss = GroupShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=42)
     train_idx, test_idx = next(gss.split(X, y, groups=groups))
 
-    # carve a val split out of train, also patient-wise, for CNN early stopping
     gss2 = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=0)
     tr_idx_rel, val_idx_rel = next(gss2.split(
         X[train_idx], y[train_idx], groups=groups[train_idx]
@@ -422,7 +407,7 @@ def main():
 
     X_tr,  y_tr  = X[tr_idx],  y[tr_idx]
     X_val, y_val = X[val_idx], y[val_idx]
-    X_train, y_train = X[train_idx], y[train_idx]   # full train (tr+val) for feature extraction
+    X_train, y_train = X[train_idx], y[train_idx]
     X_test,  y_test  = X[test_idx],  y[test_idx]
 
     print(f"Train patients : {len(np.unique(groups[tr_idx]))}  "
@@ -445,20 +430,17 @@ def main():
         print(f'  {pidx:>6}  {real_pid:>12}  {lbl_str}')
     print()
 
-    # Class weights for CNN
     cw = compute_class_weight('balanced', classes=np.array([0, 1]), y=y_tr)
     pos_weight = float(cw[1] / cw[0])
     print(f"Class weights  : survived={cw[0]:.3f}, died={cw[1]:.3f}")
     print(f"pos_weight     : {pos_weight:.3f}\n")
 
-    # DataLoaders
-    train_loader      = DataLoader(EEGDataset(X_tr,  y_tr),  batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
-    val_loader        = DataLoader(EEGDataset(X_val, y_val), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    test_loader        = DataLoader(EEGDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    full_train_loader = DataLoader(EEGDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    train_loader      = DataLoader(EEGGridDataset(X_tr,  y_tr,  SCATTER_T), batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
+    val_loader        = DataLoader(EEGGridDataset(X_val, y_val, SCATTER_T), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    test_loader       = DataLoader(EEGGridDataset(X_test, y_test, SCATTER_T), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    full_train_loader = DataLoader(EEGGridDataset(X_train, y_train, SCATTER_T), batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    # Build & train CNN feature extractor
-    model = EEG_CNN().to(DEVICE)
+    model = EEG_CNN3D().to(DEVICE)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters : {n_params:,}\n")
 
@@ -466,7 +448,6 @@ def main():
               epochs=EPOCHS, lr=LR, weight_decay=WEIGHT_DECAY,
               pos_weight=pos_weight, patience=PATIENCE)
 
-    # Extract window-level CNN features (128-dim) for train/test
     print("── Phase 2: Extracting CNN features (window-level) ──")
     X_tr_feat, y_tr_feat = extract_features(model, full_train_loader, DEVICE)
     X_te_feat, y_te_feat = extract_features(model, test_loader,        DEVICE)
@@ -475,7 +456,6 @@ def main():
 
     torch.save(model.state_dict(), SAVE_MODEL)
 
-    # ── PCA fit on train features only ──
     print(f"── Fitting PCA (n={PCA_COMPONENTS}) ───────")
     pca = PCA(n_components=PCA_COMPONENTS, random_state=42)
     X_tr_pca = pca.fit_transform(X_tr_feat)
@@ -486,9 +466,7 @@ def main():
 
     results = {}
 
-    # ── Helper to run a given (raw / pca) feature set through all 3 classifiers ──
     def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_):
-        # SVM (calibrated for proba)
         print(f"\n========== {tag}: SVM ==========")
         base_svm = SVC(kernel='rbf', C=10.0, gamma='scale',
                         class_weight='balanced', random_state=42)
@@ -499,7 +477,6 @@ def main():
         results[f"{tag}_SVM"] = evaluate(f"{tag} — SVM", y_te_, y_pred, y_proba)
         joblib.dump(svm, SAVE_DIR / f"svm_{tag}.pkl")
 
-        # Random Forest
         print(f"\n========== {tag}: Random Forest ==========")
         rf = RandomForestClassifier(
             n_estimators=300, max_depth=None, min_samples_leaf=2,
@@ -511,7 +488,6 @@ def main():
         results[f"{tag}_RF"] = evaluate(f"{tag} — Random Forest", y_te_, y_pred, y_proba)
         joblib.dump(rf, SAVE_DIR / f"rf_{tag}.pkl")
 
-        # One-layer NN
         print(f"\n========== {tag}: One-Layer NN ==========")
         nn_model, y_pred, y_proba = train_one_layer_nn(
             X_tr_, y_tr_, X_te_, y_te_, DEVICE
@@ -519,13 +495,9 @@ def main():
         results[f"{tag}_NN"] = evaluate(f"{tag} — One-Layer NN", y_te_, y_pred, y_proba)
         torch.save(nn_model.state_dict(), SAVE_DIR / f"onelayernn_{tag}.pth")
 
-    # Without PCA (raw 128-dim CNN features)
     run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat)
-
-    # With PCA
     run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat)
 
-    # ── Summary ──
     print("\n\n========== SUMMARY (window-level test set) ==========")
     header = f"  {'Model':<14}{'F1(Died)':>10}{'F1(macro)':>11}{'AUC':>8}{'AvgConf':>9}"
     print(header)

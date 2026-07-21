@@ -1,0 +1,140 @@
+(venv_train) PS C:\abalaji\bichat\EEG_bichat_CNN> python .\eegNet.py
+C:\abalaji\bichat\venv_train\Lib\site-packages\torch\cuda\__init__.py:129: UserWarning: CUDA initialization: The NVIDIA driver on your system is too old (found version 11000). Please update your GPU driver by downloading and installing a new version from the URL: http://www.nvidia.com/Download/index.aspx Alternatively, go to: https://pytorch.org to install a PyTorch version that has been compiled with your version of the CUDA driver. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10\cuda\CUDAFunctions.cpp:108.)
+  return torch._C._cuda_getDeviceCount() > 0
+Loading data...
+Channel names (in order): ['Fp1', 'C3', 'P3', 'O1', 'F7', 'T3', 'T5', 'Cz', 'Pz', 'Fp2', 'C4', 'P4', 'O2', 'F8', 'T4', 'T6']
+Chunk lengths -> min: 4172, max: 15360, unique: 5
+Length distribution: Counter({15360: 1820, 12600: 20, 11754: 20, 11904: 20, 4172: 20})
+Keeping only chunks with length == 15360: 1820 kept, 80 dropped
+Final data shape: (1820, 1, 16, 15360), labels shape: (1820,)
+Class distribution (chunks): [1360  460]
+Number of unique patients: 91
+
+Patient-level class distribution: [68 23]
+
+Patients  -> train: 57, val: 15, test: 19
+Chunks    -> train: 1140, val: 300, test: 380
+Class dist -> train: [860 280], val: [200 100], test: [300  80]
+EEGNet(
+  (conv1): Conv2d(1, 8, kernel_size=(1, 128), stride=(1, 1), padding=(0, 64), bias=False)
+  (bn1): BatchNorm2d(8, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (depthwise): DepthwiseConv2d(
+    (conv): Conv2d(8, 16, kernel_size=(16, 1), stride=(1, 1), groups=8, bias=False)
+  )
+  (bn2): BatchNorm2d(16, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool1): AvgPool2d(kernel_size=(1, 4), stride=(1, 4), padding=0)
+  (drop1): Dropout(p=0.5, inplace=False)
+  (separable): SeparableConv2d(
+    (depthwise): Conv2d(16, 16, kernel_size=(1, 16), stride=(1, 1), padding=(0, 8), groups=16, bias=False)
+    (pointwise): Conv2d(16, 16, kernel_size=(1, 1), stride=(1, 1), bias=False)
+  )
+  (bn3): BatchNorm2d(16, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool2): AvgPool2d(kernel_size=(1, 8), stride=(1, 8), padding=0)
+  (drop2): Dropout(p=0.5, inplace=False)
+  (dense): Linear(in_features=7680, out_features=2, bias=True)
+)
+Total parameters: 17,234
+Class weights: [0.6627907  2.03571429]
+Epoch [001/50]  Train Loss: 0.7359 Acc: 50.5%  |  Val Loss: 0.7816 Acc: 45.0%
+Epoch [002/50]  Train Loss: 0.6137 Acc: 66.8%  |  Val Loss: 0.7282 Acc: 51.3%
+Epoch [003/50]  Train Loss: 0.5751 Acc: 75.1%  |  Val Loss: 0.7849 Acc: 44.7%
+Epoch [004/50]  Train Loss: 0.5345 Acc: 77.0%  |  Val Loss: 0.7584 Acc: 46.0%
+Epoch [005/50]  Train Loss: 0.5223 Acc: 76.4%  |  Val Loss: 0.6735 Acc: 58.0%
+Epoch [006/50]  Train Loss: 0.4912 Acc: 80.5%  |  Val Loss: 0.6364 Acc: 62.7%
+Epoch [007/50]  Train Loss: 0.4626 Acc: 80.7%  |  Val Loss: 0.6784 Acc: 60.0%
+Epoch [008/50]  Train Loss: 0.4506 Acc: 82.2%  |  Val Loss: 0.8068 Acc: 57.7%
+Epoch [009/50]  Train Loss: 0.4619 Acc: 80.9%  |  Val Loss: 0.6379 Acc: 63.3%
+Epoch [010/50]  Train Loss: 0.4434 Acc: 80.5%  |  Val Loss: 0.6659 Acc: 63.7%
+Epoch [011/50]  Train Loss: 0.4328 Acc: 81.5%  |  Val Loss: 1.0712 Acc: 52.3%
+Epoch [012/50]  Train Loss: 0.4248 Acc: 81.6%  |  Val Loss: 0.9143 Acc: 49.3%
+Epoch [013/50]  Train Loss: 0.3776 Acc: 85.5%  |  Val Loss: 0.9478 Acc: 59.0%
+Epoch [014/50]  Train Loss: 0.3586 Acc: 86.4%  |  Val Loss: 0.8250 Acc: 56.0%
+Epoch [015/50]  Train Loss: 0.3443 Acc: 87.9%  |  Val Loss: 0.8747 Acc: 56.3%
+Epoch [016/50]  Train Loss: 0.3492 Acc: 87.3%  |  Val Loss: 0.9541 Acc: 56.3%
+Epoch [017/50]  Train Loss: 0.3298 Acc: 87.2%  |  Val Loss: 0.7798 Acc: 63.0%
+Epoch [018/50]  Train Loss: 0.3259 Acc: 88.9%  |  Val Loss: 1.0045 Acc: 52.7%
+Epoch [019/50]  Train Loss: 0.3229 Acc: 88.5%  |  Val Loss: 0.7945 Acc: 63.0%
+Epoch [020/50]  Train Loss: 0.3080 Acc: 89.4%  |  Val Loss: 0.8594 Acc: 59.3%
+Epoch [021/50]  Train Loss: 0.2940 Acc: 91.5%  |  Val Loss: 0.8753 Acc: 62.0%
+Epoch [022/50]  Train Loss: 0.2837 Acc: 91.4%  |  Val Loss: 0.8523 Acc: 64.0%
+Epoch [023/50]  Train Loss: 0.2876 Acc: 91.2%  |  Val Loss: 0.9097 Acc: 61.0%
+Epoch [024/50]  Train Loss: 0.2873 Acc: 91.7%  |  Val Loss: 0.8934 Acc: 60.0%
+Epoch [025/50]  Train Loss: 0.2849 Acc: 90.4%  |  Val Loss: 0.9154 Acc: 62.0%
+Epoch [026/50]  Train Loss: 0.2681 Acc: 91.8%  |  Val Loss: 0.8873 Acc: 62.7%
+Epoch [027/50]  Train Loss: 0.2589 Acc: 92.6%  |  Val Loss: 0.9423 Acc: 58.3%
+Epoch [028/50]  Train Loss: 0.2717 Acc: 91.3%  |  Val Loss: 0.8916 Acc: 63.3%
+Epoch [029/50]  Train Loss: 0.2608 Acc: 92.6%  |  Val Loss: 0.9510 Acc: 63.0%
+Epoch [030/50]  Train Loss: 0.2661 Acc: 92.1%  |  Val Loss: 0.9235 Acc: 61.0%
+Epoch [031/50]  Train Loss: 0.2666 Acc: 93.2%  |  Val Loss: 0.9257 Acc: 63.7%
+Epoch [032/50]  Train Loss: 0.2555 Acc: 93.9%  |  Val Loss: 0.8788 Acc: 63.3%
+Epoch [033/50]  Train Loss: 0.2603 Acc: 93.0%  |  Val Loss: 0.9209 Acc: 63.7%
+Epoch [034/50]  Train Loss: 0.2553 Acc: 94.3%  |  Val Loss: 0.9505 Acc: 62.3%
+Epoch [035/50]  Train Loss: 0.2470 Acc: 93.8%  |  Val Loss: 0.9697 Acc: 60.7%
+Epoch [036/50]  Train Loss: 0.2481 Acc: 93.4%  |  Val Loss: 0.8890 Acc: 64.0%
+Epoch [037/50]  Train Loss: 0.2355 Acc: 94.5%  |  Val Loss: 0.9347 Acc: 63.3%
+Epoch [038/50]  Train Loss: 0.2543 Acc: 93.3%  |  Val Loss: 0.9206 Acc: 64.3%
+Epoch [039/50]  Train Loss: 0.2485 Acc: 93.2%  |  Val Loss: 0.9608 Acc: 63.0%
+Epoch [040/50]  Train Loss: 0.2458 Acc: 93.3%  |  Val Loss: 0.9519 Acc: 61.0%
+Epoch [041/50]  Train Loss: 0.2518 Acc: 92.6%  |  Val Loss: 0.9430 Acc: 61.7%
+Epoch [042/50]  Train Loss: 0.2539 Acc: 93.0%  |  Val Loss: 0.8713 Acc: 63.3%
+Epoch [043/50]  Train Loss: 0.2381 Acc: 93.6%  |  Val Loss: 0.8968 Acc: 63.3%
+Epoch [044/50]  Train Loss: 0.2359 Acc: 94.1%  |  Val Loss: 0.9878 Acc: 61.0%
+Epoch [045/50]  Train Loss: 0.2479 Acc: 93.1%  |  Val Loss: 0.9429 Acc: 60.7%
+Epoch [046/50]  Train Loss: 0.2459 Acc: 92.3%  |  Val Loss: 0.9595 Acc: 62.3%
+Epoch [047/50]  Train Loss: 0.2463 Acc: 93.9%  |  Val Loss: 0.9122 Acc: 64.7%
+Epoch [048/50]  Train Loss: 0.2409 Acc: 94.8%  |  Val Loss: 1.0078 Acc: 61.3%
+Epoch [049/50]  Train Loss: 0.2462 Acc: 92.7%  |  Val Loss: 0.8641 Acc: 64.7%
+Epoch [050/50]  Train Loss: 0.2338 Acc: 94.4%  |  Val Loss: 0.9180 Acc: 63.7%
+Best val loss: 0.6364
+
+Test accuracy: 0.7053
+
+Classification Report (chunk-level, held-out patients):
+              precision    recall  f1-score   support
+
+           0       0.86      0.75      0.80       300
+           1       0.37      0.55      0.44        80
+
+    accuracy                           0.71       380
+   macro avg       0.61      0.65      0.62       380
+weighted avg       0.76      0.71      0.72       380
+
+
+Confusion Matrix:
+[[224  76]
+ [ 36  44]]
+ROC-AUC: 0.6330
+
+── Patient-level results (majority vote across chunks) ──
+  Patient 1214: true=0, predicted(majority)=1, n_chunks=20, chunk_preds=[0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0], correct_chunks=9/20
+  Patient 8064: true=1, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0], correct_chunks=4/20
+  Patient 8099: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0], correct_chunks=19/20
+  Patient 8102: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0], correct_chunks=17/20
+  Patient 8133: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], correct_chunks=19/20
+  Patient 8158: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=20/20
+  Patient 8173: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1], correct_chunks=12/20
+  Patient 8192: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1], correct_chunks=12/20
+  Patient 8227: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1], correct_chunks=16/20
+  Patient 8251: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=19/20
+  Patient 8254: true=0, predicted(majority)=1, n_chunks=20, chunk_preds=[0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0], correct_chunks=9/20
+  Patient 8267: true=0, predicted(majority)=1, n_chunks=20, chunk_preds=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0], correct_chunks=2/20
+  Patient 8281: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], correct_chunks=16/20
+  Patient 8300: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0], correct_chunks=12/20
+  Patient 8446: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=20/20
+  Patient 8502: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=17/20
+  Patient 8575: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0], correct_chunks=15/20
+  Patient 8796: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1], correct_chunks=13/20
+  Patient 8813: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=17/20
+
+Overall chunk-level accuracy within test patients: 268/380 (70.5%)
+
+Patient-level accuracy: 0.7895
+              precision    recall  f1-score   support
+
+           0       0.92      0.80      0.86        15
+           1       0.50      0.75      0.60         4
+
+    accuracy                           0.79        19
+   macro avg       0.71      0.78      0.73        19
+weighted avg       0.83      0.79      0.80        19
+
