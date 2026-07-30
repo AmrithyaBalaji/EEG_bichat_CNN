@@ -1,0 +1,156 @@
+Loading data...
+Channel names (in order): ['Fp1', 'C3', 'P3', 'O1', 'F7', 'T3', 'T5', 'Cz', 'Pz', 'Fp2', 'C4', 'P4', 'O2', 'F8', 'T4', 'T6']
+Keeping only chunks with length == 15360: 1820 kept, 80 dropped
+Final data shape: (1820, 1, 16, 15360), labels shape: (1820,)
+
+Selected patients (class 0): ['8551', '8158', '8097', '8112', '8263']
+Selected patients (class 1): ['8093', '5160', '8154', '8290', '8228']
+
+=== Leave-one-out fold: held-out patient 8551 ===
+  train chunks: 1800  (class dist [1340  460])
+  test chunks:  20  true patient label: 0
+    epoch 010/50  loss=0.5305  acc=77.3%
+    epoch 020/50  loss=0.4744  acc=78.4%
+    epoch 030/50  loss=0.4126  acc=80.2%
+    epoch 040/50  loss=0.3839  acc=83.1%
+    epoch 050/50  loss=0.3890  acc=82.4%
+  chunk preds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1]
+  chunk-level acc: 7/20
+  majority-vote prediction: 1  (true: 0)  WRONG
+
+=== Leave-one-out fold: held-out patient 8158 ===
+  train chunks: 1800  (class dist [1340  460])
+  test chunks:  20  true patient label: 0
+    epoch 010/50  loss=0.5180  acc=76.1%
+    epoch 020/50  loss=0.4480  acc=79.3%
+    epoch 030/50  loss=0.3952  acc=82.3%
+    epoch 040/50  loss=0.3649  acc=83.6%
+    epoch 050/50  loss=0.3392  acc=85.6%
+  chunk preds: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  chunk-level acc: 20/20
+  majority-vote prediction: 0  (true: 0)  CORRECT
+
+=== Leave-one-out fold: held-out patient 8097 ===
+  train chunks: 1800  (class dist [1340  460])
+  test chunks:  20  true patient label: 0
+    epoch 010/50  loss=0.4843  acc=75.7%
+    epoch 020/50  loss=0.4176  acc=81.9%
+    epoch 030/50  loss=0.3634  acc=83.8%
+    epoch 040/50  loss=0.3675  acc=82.8%
+    epoch 050/50  loss=0.3374  acc=83.8%
+  chunk preds: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  chunk-level acc: 18/20
+  majority-vote prediction: 0  (true: 0)  CORRECT
+
+=== Leave-one-out fold: held-out patient 8112 ===
+  train chunks: 1800  (class dist [1340  460])
+  test chunks:  20  true patient label: 0
+    epoch 010/50  loss=0.5308  acc=76.2%
+    epoch 020/50  loss=0.4511  acc=78.9%
+    epoch 030/50  loss=0.4046  acc=81.7%
+    epoch 040/50  loss=0.3766  acc=82.2%
+    epoch 050/50  loss=0.3310  acc=85.7%
+  chunk preds: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  chunk-level acc: 20/20
+  majority-vote prediction: 0  (true: 0)  CORRECT
+
+=== Leave-one-out fold: held-out patient 8263 ===
+  train chunks: 1800  (class dist [1340  460])
+  test chunks:  20  true patient label: 0
+    epoch 010/50  loss=0.5146  acc=76.2%
+    epoch 020/50  loss=0.4726  acc=77.9%
+    epoch 030/50  loss=0.4015  acc=81.1%
+    epoch 040/50  loss=0.3721  acc=82.8%
+    epoch 050/50  loss=0.3233  acc=85.9%
+  chunk preds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  chunk-level acc: 0/20
+  majority-vote prediction: 1  (true: 0)  WRONG
+
+=== Leave-one-out fold: held-out patient 8093 ===
+  train chunks: 1800  (class dist [1360  440])
+  test chunks:  20  true patient label: 1
+    epoch 010/50  loss=0.5303  acc=74.6%
+    epoch 020/50  loss=0.4874  acc=76.1%
+    epoch 030/50  loss=0.4331  acc=80.3%
+    epoch 040/50  loss=0.4022  acc=81.2%
+    epoch 050/50  loss=0.3768  acc=83.7%
+  chunk preds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  chunk-level acc: 20/20
+  majority-vote prediction: 1  (true: 1)  CORRECT
+
+=== Leave-one-out fold: held-out patient 5160 ===
+  train chunks: 1800  (class dist [1360  440])
+  test chunks:  20  true patient label: 1
+    epoch 010/50  loss=0.5291  acc=74.2%
+    epoch 020/50  loss=0.4619  acc=79.3%
+    epoch 030/50  loss=0.4178  acc=80.4%
+    epoch 040/50  loss=0.4190  acc=80.1%
+    epoch 050/50  loss=0.3915  acc=83.6%
+  chunk preds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  chunk-level acc: 19/20
+  majority-vote prediction: 1  (true: 1)  CORRECT
+
+=== Leave-one-out fold: held-out patient 8154 ===
+  train chunks: 1800  (class dist [1360  440])
+  test chunks:  20  true patient label: 1
+    epoch 010/50  loss=0.5287  acc=74.3%
+    epoch 020/50  loss=0.4470  acc=80.3%
+    epoch 030/50  loss=0.3849  acc=82.9%
+    epoch 040/50  loss=0.3622  acc=84.2%
+    epoch 050/50  loss=0.3127  acc=86.7%
+  chunk preds: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0]
+  chunk-level acc: 4/20
+  majority-vote prediction: 0  (true: 1)  WRONG
+
+=== Leave-one-out fold: held-out patient 8290 ===
+  train chunks: 1800  (class dist [1360  440])
+  test chunks:  20  true patient label: 1
+    epoch 010/50  loss=0.5200  acc=75.7%
+    epoch 020/50  loss=0.4568  acc=78.2%
+    epoch 030/50  loss=0.3851  acc=84.4%
+    epoch 040/50  loss=0.3720  acc=84.2%
+    epoch 050/50  loss=0.3631  acc=84.1%
+  chunk preds: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  chunk-level acc: 0/20
+  majority-vote prediction: 0  (true: 1)  WRONG
+
+=== Leave-one-out fold: held-out patient 8228 ===
+  train chunks: 1800  (class dist [1360  440])
+  test chunks:  20  true patient label: 1
+    epoch 010/50  loss=0.5303  acc=74.8%
+    epoch 020/50  loss=0.4521  acc=77.5%
+    epoch 030/50  loss=0.4088  acc=81.9%
+    epoch 040/50  loss=0.3762  acc=84.2%
+    epoch 050/50  loss=0.3286  acc=86.7%
+  chunk preds: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  chunk-level acc: 20/20
+  majority-vote prediction: 1  (true: 1)  CORRECT
+
+
+===================== SUMMARY =====================
+  Patient 8551: true=0 pred=1 (7/20 chunks correct) -> WRONG
+  Patient 8158: true=0 pred=0 (20/20 chunks correct) -> CORRECT
+  Patient 8097: true=0 pred=0 (18/20 chunks correct) -> CORRECT
+  Patient 8112: true=0 pred=0 (20/20 chunks correct) -> CORRECT
+  Patient 8263: true=0 pred=1 (0/20 chunks correct) -> WRONG
+  Patient 8093: true=1 pred=1 (20/20 chunks correct) -> CORRECT
+  Patient 5160: true=1 pred=1 (19/20 chunks correct) -> CORRECT
+  Patient 8154: true=1 pred=0 (4/20 chunks correct) -> WRONG
+  Patient 8290: true=1 pred=0 (0/20 chunks correct) -> WRONG
+  Patient 8228: true=1 pred=1 (20/20 chunks correct) -> CORRECT
+
+LOPO patient-level accuracy: 0.6000 (6/10)
+
+Classification report (patient-level, LOPO):
+              precision    recall  f1-score   support
+
+           0       0.60      0.60      0.60         5
+           1       0.60      0.60      0.60         5
+
+    accuracy                           0.60        10
+   macro avg       0.60      0.60      0.60        10
+weighted avg       0.60      0.60      0.60        10
+
+Confusion matrix (patient-level, LOPO):
+[[3 2]
+ [2 3]]
