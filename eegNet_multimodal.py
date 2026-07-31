@@ -36,7 +36,7 @@ EPOCHS = 50
 LR = 1e-3
 WEIGHT_DECAY = 0.0
 PATIENCE = 15
-USE_EARLY_STOPPING = False
+USE_EARLY_STOPPING = True
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(RANDOM_SEED)
@@ -72,10 +72,6 @@ def load_one_file(filepath, label_col_name="label"):
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    if df.isna().any().any():
-        bad_cols = df.columns[df.isna().any()].tolist()
-        raise ValueError(f"Non-numeric/NaN values found in {filepath} after coercion, columns: {bad_cols}")
-
     channel_names = list(df.columns)
     arr = df.values.T
 
@@ -110,13 +106,9 @@ def load_dataset(data_root, classes):
             elif channel_names != channel_names_ref:
                 print(f"WARNING: channel order/names differ in {f}")
 
-            if file_label is not None:
-                try:
-                    if int(file_label) != label_idx:
-                        print(f"WARNING: label mismatch in {f} — folder says {label_idx}, "
-                              f"file column says {file_label}. Using folder label.")
-                except (ValueError, TypeError):
-                    print(f"WARNING: unreadable label column value in {f}: {file_label!r}")
+            if file_label is not None and int(file_label) != label_idx:
+                print(f"WARNING: label mismatch in {f} — folder says {label_idx}, "
+                      f"file column says {file_label}. Using folder label.")
 
             X.append(arr)
             y.append(label_idx)
@@ -200,41 +192,17 @@ Xclin_train_raw = Xclin_pool[train_idx_rel]
 Xclin_val_raw = Xclin_pool[val_idx_rel]
 Xclin_test_raw = clinical_raw[test_idx]
 
+clin_scaler = StandardScaler()
+Xclin_train = clin_scaler.fit_transform(Xclin_train_raw).astype(np.float32)
+Xclin_val = clin_scaler.transform(Xclin_val_raw).astype(np.float32)
+Xclin_test = clin_scaler.transform(Xclin_test_raw).astype(np.float32)
+
 train_pids_final = np.unique(pid_pool[train_idx_rel])
 val_pids_final = np.unique(pid_pool[val_idx_rel])
 
 assert set(train_pids_final).isdisjoint(set(val_pids_final))
 assert set(train_pids_final).isdisjoint(set(test_pids))
 assert set(val_pids_final).isdisjoint(set(test_pids))
-
-clin_scaler = StandardScaler()
-clin_scaler.fit(clinical_lookup.loc[train_pids_final].values.astype(np.float32))
-Xclin_train = clin_scaler.transform(Xclin_train_raw).astype(np.float32)
-Xclin_val = clin_scaler.transform(Xclin_val_raw).astype(np.float32)
-Xclin_test = clin_scaler.transform(Xclin_test_raw).astype(np.float32)
-
-eeg_mean = X_train.mean(axis=(0, 1, 3), keepdims=True)
-eeg_std = X_train.std(axis=(0, 1, 3), keepdims=True)
-
-print("\n" + "=" * 60)
-print("EEG NORMALIZATION DIAGNOSTIC (per channel, train set)")
-print("=" * 60)
-for ch_idx in range(eeg_std.shape[2]):
-    ch_name = channel_names[ch_idx] if channel_names else f"ch{ch_idx}"
-    print(f"  {ch_name:>12s}: mean={eeg_mean[0,0,ch_idx,0]:.6f}  std={eeg_std[0,0,ch_idx,0]:.6f}")
-
-low_var_mask = eeg_std.squeeze() < 1e-3
-if low_var_mask.any():
-    low_var_channels = [channel_names[i] if channel_names else f"ch{i}"
-                         for i in np.where(low_var_mask)[0]]
-    print(f"WARNING: near-zero variance channels detected: {low_var_channels}")
-    print("These will be amplified heavily by normalization — inspect before training.")
-print("=" * 60 + "\n")
-
-eeg_std[eeg_std < 1e-8] = 1e-8
-X_train = (X_train - eeg_mean) / eeg_std
-X_val = (X_val - eeg_mean) / eeg_std
-X_test = (X_test - eeg_mean) / eeg_std
 
 print(f"\nPatients  -> train: {len(train_pids_final)}, val: {len(val_pids_final)}, test: {len(test_pids)}")
 print(f"Chunks    -> train: {X_train.shape[0]}, val: {X_val.shape[0]}, test: {X_test.shape[0]}")
@@ -272,13 +240,6 @@ class MaxNormConstraint:
             w *= (desired / norm)
 
 
-def same_pad_1d(x, kernel_size):
-    total_pad = kernel_size - 1
-    left = total_pad // 2
-    right = total_pad - left
-    return F.pad(x, (left, right))
-
-
 class DepthwiseConv2d(nn.Module):
     def __init__(self, in_channels, depth_multiplier, kernel_size, bias=False):
         super().__init__()
@@ -292,15 +253,13 @@ class DepthwiseConv2d(nn.Module):
 
 
 class SeparableConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, bias=False):
+    def __init__(self, in_channels, out_channels, kernel_size, padding=0, bias=False):
         super().__init__()
-        self.kernel_size = kernel_size
         self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size,
-                                    padding=0, groups=in_channels, bias=False)
+                                    padding=padding, groups=in_channels, bias=False)
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
     def forward(self, x):
-        x = same_pad_1d(x, self.kernel_size[1])
         x = self.depthwise(x)
         x = self.pointwise(x)
         return x
@@ -318,8 +277,8 @@ class EEGNetFeatureExtractor(nn.Module):
         else:
             raise ValueError("dropoutType must be 'SpatialDropout2D' or 'Dropout'")
 
-        self.kernLength = kernLength
-        self.conv1 = nn.Conv2d(1, F1, kernel_size=(1, kernLength), padding=0, bias=False)
+        self.conv1 = nn.Conv2d(1, F1, kernel_size=(1, kernLength),
+                                padding=(0, kernLength // 2), bias=False)
         self.bn1 = nn.BatchNorm2d(F1)
 
         self.depthwise = DepthwiseConv2d(F1, D, kernel_size=(Chans, 1), bias=False)
@@ -327,7 +286,8 @@ class EEGNetFeatureExtractor(nn.Module):
         self.pool1 = nn.AvgPool2d((1, 4))
         self.drop1 = self.dropoutType(dropoutRate)
 
-        self.separable = SeparableConv2d(F1 * D, F2, kernel_size=(1, 16))
+        self.separable = SeparableConv2d(F1 * D, F2, kernel_size=(1, 16),
+                                          padding=(0, 8), bias=False)
         self.bn3 = nn.BatchNorm2d(F2)
         self.pool2 = nn.AvgPool2d((1, 8))
         self.drop2 = self.dropoutType(dropoutRate)
@@ -335,15 +295,11 @@ class EEGNetFeatureExtractor(nn.Module):
         self._depthwise_constraint = MaxNormConstraint(1.0, dim=(1, 2, 3))
 
         with torch.no_grad():
-            was_training = self.training
-            self.eval()
             dummy = torch.zeros(1, 1, Chans, Samples)
             out = self.forward(dummy)
             self.out_dim = out.shape[1]
-            self.train(was_training)
 
     def forward(self, x):
-        x = same_pad_1d(x, self.kernLength)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.depthwise(x)
