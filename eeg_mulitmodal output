@@ -1,0 +1,125 @@
+(venv_train) PS D:\abalaji\EEG_bichat_CNN> python .\eegNet_multimodal.py
+Loading EEG data...
+Channel names (in order): ['Fp1', 'C3', 'P3', 'O1', 'F7', 'T3', 'T5', 'Cz', 'Pz', 'Fp2', 'C4', 'P4', 'O2', 'F8', 'T4', 'T6']
+Chunk lengths -> min: 4172, max: 15360, unique: 5
+Length distribution: Counter({15360: 1820, 12600: 20, 11754: 20, 11904: 20, 4172: 20})
+Keeping only chunks with length == 15360: 1820 kept, 80 dropped
+Final EEG data shape: (1820, 1, 16, 15360), labels shape: (1820,)
+Class distribution (chunks): [1360  460]
+Number of unique patients: 91
+
+Loading clinical data...
+Clinical feature matrix shape: (1820, 7)
+
+Patient-level class distribution: [68 23]
+
+Patients  -> train: 57, val: 15, test: 19
+Chunks    -> train: 1140, val: 300, test: 380
+Class dist -> train: [860 280], val: [200 100], test: [300  80]
+MultiModalEEGNet(
+  (eeg_branch): EEGNetFeatureExtractor(
+    (conv1): Conv2d(1, 8, kernel_size=(1, 128), stride=(1, 1), padding=(0, 64), bias=False)
+    (bn1): BatchNorm2d(8, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (depthwise): DepthwiseConv2d(
+      (conv): Conv2d(8, 16, kernel_size=(16, 1), stride=(1, 1), groups=8, bias=False)
+    )
+    (bn2): BatchNorm2d(16, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (pool1): AvgPool2d(kernel_size=(1, 4), stride=(1, 4), padding=0)
+    (drop1): Dropout(p=0.5, inplace=False)
+    (separable): SeparableConv2d(
+      (depthwise): Conv2d(16, 16, kernel_size=(1, 16), stride=(1, 1), padding=(0, 8), groups=16, bias=False)
+      (pointwise): Conv2d(16, 16, kernel_size=(1, 1), stride=(1, 1), bias=False)
+    )
+    (bn3): BatchNorm2d(16, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (pool2): AvgPool2d(kernel_size=(1, 8), stride=(1, 8), padding=0)
+    (drop2): Dropout(p=0.5, inplace=False)
+  )
+  (clinical_branch): ClinicalMLP(
+    (net): Sequential(
+      (0): Linear(in_features=7, out_features=32, bias=True)
+      (1): ReLU()
+      (2): Dropout(p=0.3, inplace=False)
+      (3): Linear(in_features=32, out_features=16, bias=True)
+      (4): ReLU()
+    )
+  )
+  (classifier): Sequential(
+    (0): Linear(in_features=7696, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Dropout(p=0.5, inplace=False)
+    (3): Linear(in_features=32, out_features=2, bias=True)
+  )
+)
+Total parameters: 249,026
+Class weights: [0.6627907  2.03571429]
+Epoch [001/50]  Train Loss: 0.7111 Acc: 56.2%  |  Val Loss: 0.7287 Acc: 47.0%
+Epoch [002/50]  Train Loss: 0.6279 Acc: 64.3%  |  Val Loss: 0.6893 Acc: 53.7%
+Epoch [003/50]  Train Loss: 0.5056 Acc: 77.3%  |  Val Loss: 0.6683 Acc: 64.0%
+Epoch [004/50]  Train Loss: 0.3387 Acc: 88.7%  |  Val Loss: 0.6973 Acc: 68.3%
+Epoch [005/50]  Train Loss: 0.1973 Acc: 93.2%  |  Val Loss: 0.8402 Acc: 68.7%
+Epoch [006/50]  Train Loss: 0.1702 Acc: 94.2%  |  Val Loss: 0.8815 Acc: 69.0%
+Epoch [007/50]  Train Loss: 0.1055 Acc: 97.8%  |  Val Loss: 0.9322 Acc: 68.7%
+Epoch [008/50]  Train Loss: 0.0887 Acc: 97.5%  |  Val Loss: 1.0352 Acc: 68.0%
+Epoch [009/50]  Train Loss: 0.0832 Acc: 97.8%  |  Val Loss: 1.0865 Acc: 70.0%
+Epoch [010/50]  Train Loss: 0.0699 Acc: 98.6%  |  Val Loss: 1.0992 Acc: 67.7%
+Epoch [011/50]  Train Loss: 0.0594 Acc: 98.5%  |  Val Loss: 1.1983 Acc: 69.7%
+Epoch [012/50]  Train Loss: 0.0614 Acc: 97.9%  |  Val Loss: 1.2205 Acc: 69.0%
+Epoch [013/50]  Train Loss: 0.0539 Acc: 98.7%  |  Val Loss: 1.3087 Acc: 70.3%
+Epoch [014/50]  Train Loss: 0.0526 Acc: 98.9%  |  Val Loss: 1.2818 Acc: 68.7%
+Epoch [015/50]  Train Loss: 0.0348 Acc: 99.4%  |  Val Loss: 1.3369 Acc: 69.0%
+Epoch [016/50]  Train Loss: 0.0414 Acc: 99.3%  |  Val Loss: 1.3990 Acc: 69.7%
+Epoch [017/50]  Train Loss: 0.0377 Acc: 99.3%  |  Val Loss: 1.3492 Acc: 69.0%
+Epoch [018/50]  Train Loss: 0.0348 Acc: 99.1%  |  Val Loss: 1.4115 Acc: 69.0%
+Early stopping at epoch 18
+Best val loss: 0.6683
+
+Test accuracy: 0.7553
+
+Classification Report (chunk-level, held-out patients):
+              precision    recall  f1-score   support
+
+           0       0.88      0.80      0.84       300
+           1       0.44      0.57      0.50        80
+
+    accuracy                           0.76       380
+   macro avg       0.66      0.69      0.67       380
+weighted avg       0.78      0.76      0.77       380
+
+
+Confusion Matrix:
+[[241  59]
+ [ 34  46]]
+ROC-AUC: 0.7021
+
+── Patient-level results (majority vote across chunks) ──
+  Patient 1214: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1], correct_chunks=13/20
+  Patient 8064: true=1, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=0/20
+  Patient 8099: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0], correct_chunks=15/20
+  Patient 8102: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0], correct_chunks=18/20
+  Patient 8133: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=20/20
+  Patient 8158: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=19/20
+  Patient 8173: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=19/20
+  Patient 8192: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1], correct_chunks=17/20
+  Patient 8227: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1], correct_chunks=14/20
+  Patient 8251: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0], correct_chunks=17/20
+  Patient 8254: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0], correct_chunks=19/20
+  Patient 8267: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0], correct_chunks=12/20
+  Patient 8281: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=20/20
+  Patient 8300: true=1, predicted(majority)=1, n_chunks=20, chunk_preds=[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1], correct_chunks=15/20
+  Patient 8446: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0], correct_chunks=16/20
+  Patient 8502: true=0, predicted(majority)=1, n_chunks=20, chunk_preds=[0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1], correct_chunks=8/20
+  Patient 8575: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], correct_chunks=16/20
+  Patient 8796: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], correct_chunks=18/20
+  Patient 8813: true=0, predicted(majority)=0, n_chunks=20, chunk_preds=[0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0], correct_chunks=11/20
+
+Overall chunk-level accuracy within test patients: 287/380 (75.5%)
+
+Patient-level accuracy: 0.8947
+              precision    recall  f1-score   support
+
+           0       0.93      0.93      0.93        15
+           1       0.75      0.75      0.75         4
+
+    accuracy                           0.89        19
+   macro avg       0.84      0.84      0.84        19
+weighted avg       0.89      0.89      0.89        19

@@ -36,7 +36,7 @@ EPOCHS = 50
 LR = 1e-3
 WEIGHT_DECAY = 0.0
 PATIENCE = 15
-USE_EARLY_STOPPING = False
+USE_EARLY_STOPPING = True
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(RANDOM_SEED)
