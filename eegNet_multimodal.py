@@ -29,19 +29,14 @@ RANDOM_SEED = 42
 TARGET_LENGTH = 15360
 
 TEST_SIZE = 0.2
-VAL_SIZE = 0.1
+VAL_SIZE = 0.2
 
 BATCH_SIZE = 32
 EPOCHS = 50
-LR = 1e-4
-WEIGHT_DECAY = 1e-5
-PATIENCE = 25
-USE_EARLY_STOPPING = False
-
-DROPOUT_RATE = 0.65
-LABEL_SMOOTHING = 0.1
-TRAIN_NOISE_STD = 0.05
-GRAD_CLIP_NORM = 1.0
+LR = 1e-3
+WEIGHT_DECAY = 0.0
+PATIENCE = 15
+USE_EARLY_STOPPING = True
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(RANDOM_SEED)
@@ -350,8 +345,7 @@ class MultiModalEEGNet(nn.Module):
             Chans=Chans, Samples=Samples, dropoutRate=dropoutRate,
             kernLength=kernLength, F1=F1, D=D, F2=F2, dropoutType=dropoutType
         )
-        self.clinical_branch = ClinicalMLP(n_clinical_features, clinical_hidden, clinical_out,
-                                            dropout=dropoutRate)
+        self.clinical_branch = ClinicalMLP(n_clinical_features, clinical_hidden, clinical_out)
 
         fusion_in = self.eeg_branch.out_dim + clinical_out
         self.classifier = nn.Sequential(
@@ -380,7 +374,7 @@ model = MultiModalEEGNet(
     Samples=SAMPLES,
     kernLength=FS // 2,
     F1=8, D=2, F2=16,
-    dropoutRate=DROPOUT_RATE,
+    dropoutRate=0.5,
     dropoutType='Dropout'
 ).to(DEVICE)
 
@@ -392,7 +386,7 @@ class_weights = compute_class_weight('balanced', classes=np.array([0, 1]), y=y_t
 class_weights_t = torch.tensor(class_weights, dtype=torch.float32).to(DEVICE)
 print(f"Class weights: {class_weights}")
 
-criterion = nn.CrossEntropyLoss(weight=class_weights_t, label_smoothing=LABEL_SMOOTHING)
+criterion = nn.CrossEntropyLoss(weight=class_weights_t)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
@@ -406,15 +400,10 @@ for epoch in range(1, EPOCHS + 1):
     for X_b, Xclin_b, y_b in train_loader:
         X_b, Xclin_b, y_b = X_b.to(DEVICE), Xclin_b.to(DEVICE), y_b.to(DEVICE)
 
-        if TRAIN_NOISE_STD > 0:
-            X_b = X_b + torch.randn_like(X_b) * TRAIN_NOISE_STD * X_b.std()
-
         optimizer.zero_grad()
         logits = model(X_b, Xclin_b)
         loss = criterion(logits, y_b)
         loss.backward()
-        if GRAD_CLIP_NORM > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
         optimizer.step()
         model.apply_constraints()
 
