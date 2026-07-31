@@ -215,6 +215,8 @@ Xclin_test = clin_scaler.transform(Xclin_test_raw).astype(np.float32)
 
 eeg_mean = X_train.mean(axis=(0, 1, 3), keepdims=True)
 eeg_std = X_train.std(axis=(0, 1, 3), keepdims=True)
+print("\nPer-channel EEG mean (train):", eeg_mean.squeeze())
+print("Per-channel EEG std (train):", eeg_std.squeeze())
 eeg_std[eeg_std < 1e-8] = 1e-8
 X_train = (X_train - eeg_mean) / eeg_std
 X_val = (X_val - eeg_mean) / eeg_std
@@ -506,7 +508,7 @@ if len(np.unique(y_test_true)) > 1:
 
 test_pids_per_chunk = patient_ids[test_idx]
 
-print("\n── Patient-level results (mean predicted probability across chunks) ──")
+print("\n── Patient-level results (majority vote across chunks) ──")
 patient_true, patient_pred = [], []
 total_correct_chunks = 0
 total_chunks = 0
@@ -514,8 +516,7 @@ total_chunks = 0
 for pid in np.unique(test_pids_per_chunk):
     mask = test_pids_per_chunk == pid
     true_label = y_test[mask][0]
-    mean_probs = y_pred_probs[mask].mean(axis=0)
-    pred_label = int(mean_probs.argmax())
+    pred_label = np.bincount(y_pred[mask]).argmax()
     patient_true.append(true_label)
     patient_pred.append(pred_label)
 
@@ -524,7 +525,7 @@ for pid in np.unique(test_pids_per_chunk):
     total_correct_chunks += n_correct
     total_chunks += n_chunks
 
-    print(f"  Patient {pid}: true={true_label}, predicted(mean-prob)={pred_label}, "
+    print(f"  Patient {pid}: true={true_label}, predicted(majority)={pred_label}, "
           f"n_chunks={n_chunks}, chunk_preds={y_pred[mask].tolist()}, "
           f"correct_chunks={n_correct}/{n_chunks}")
 
