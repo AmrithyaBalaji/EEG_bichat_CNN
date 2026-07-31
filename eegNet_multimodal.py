@@ -15,8 +15,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.utils.class_weight import compute_class_weight
 
-DATA_ROOT = r"C:\abalaji\bichat\ORIGINAL_DATA\chunks_20"
-CLINICAL_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data_labeled_imputed.xlsx"
+DATA_ROOT = r"D:\abalaji\chunks_20"
+CLINICAL_PATH = r"D:\abalaji\EEG_bichat_CNN\clinical_data_labeled_imputed.xlsx"
 CLINICAL_FEATURE_COLS = ["SEXE", "AGE", "HTA", "Diabète", "Obésité",
                           "Valeur NSE 1 (µg/L)", "Valeur NSE 2 (µg/L)"]
 
