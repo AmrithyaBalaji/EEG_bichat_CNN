@@ -30,6 +30,7 @@ logger.info("START")
 DATA_ROOT          = Path(r"D:\abalaji\chunks_20")
 FILTERED_DATA_ROOT  = Path(r"D:\abalaji\chunks_20_filtered")
 FORCE_REFILTER      = False
+USE_FILTERED_DATA   = True
 
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
@@ -608,13 +609,18 @@ def run_split(train_pids, test_pids, patient_files, device, run_tag, pid_labels)
 def main():
     print(f"Device : {DEVICE}\n")
 
-    filter_and_save_all_files(
-        DATA_ROOT, FILTERED_DATA_ROOT,
-        order=FILTER_ORDER, cutoff=FILTER_CUTOFF, fs=FILTER_FS,
-        force=FORCE_REFILTER
-    )
+    if USE_FILTERED_DATA:
+        filter_and_save_all_files(
+            DATA_ROOT, FILTERED_DATA_ROOT,
+            order=FILTER_ORDER, cutoff=FILTER_CUTOFF, fs=FILTER_FS,
+            force=FORCE_REFILTER
+        )
+        active_data_root = FILTERED_DATA_ROOT
+    else:
+        active_data_root = DATA_ROOT
 
-    patient_files, pid_labels = discover_patient_files(FILTERED_DATA_ROOT)
+    print(f"[Data] Using {active_data_root}\n")
+    patient_files, pid_labels = discover_patient_files(active_data_root)
 
     train_pool_pids, holdout_pids, holdout_died, holdout_survived = make_holdout_split(
         pid_labels,
