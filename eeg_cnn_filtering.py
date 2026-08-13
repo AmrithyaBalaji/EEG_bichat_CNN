@@ -30,7 +30,7 @@ logger.info("START")
 DATA_ROOT          = Path(r"D:\abalaji\chunks_20")
 FILTERED_DATA_ROOT  = Path(r"D:\abalaji\chunks_20_filtered")
 FORCE_REFILTER      = False
-USE_FILTERED_DATA   = True
+USE_FILTERED_DATA   = False
 
 N_CHANNELS     = 16
 WINDOW_SIZE    = 256
@@ -49,8 +49,8 @@ FILTER_ORDER   = 4
 FILTER_CUTOFF  = 100.0
 FILTER_FS      = 256.0
 
-N_HELDOUT_SURVIVED = 3
-N_HELDOUT_DIED      = 1
+N_HELDOUT_SURVIVED = 5
+N_HELDOUT_DIED      = 5
 N_CV_FOLDS          = 5
 
 SAVE_DIR       = Path("models_v5_kfold")
@@ -486,7 +486,7 @@ def evaluate_patient_majority(name, groups, y_pred, y_proba, pid_labels):
     mean_proba  = df.groupby("pid")["proba"].mean()
 
     y_pred_patient = (vote >= 0.5).astype(int)
-    y_true_patient = vote.index.map(pid_labels)
+    y_true_patient = pd.Series(vote.index.map(pid_labels), index=vote.index)
 
     print(f"\n── Patient-level majority vote: {name} ────────────────────────")
     print(classification_report(
