@@ -1,4 +1,5 @@
 import re
+import logging
 import numpy as np
 import pandas as pd
 import joblib
@@ -223,8 +224,6 @@ def extract_windows(chunk, label, window_size, step_size):
 
 def build_windows_for_patients(patient_files, pids, window_size, step_size,
                                 n_channels=N_CHANNELS, tag=""):
-    pid_to_idx = {pid: idx for idx, pid in enumerate(sorted(patient_files.keys()))}
-
     windows_all, labels_all, groups_all = [], [], []
     skipped = 0
     n_chunks = 0
@@ -251,7 +250,7 @@ def build_windows_for_patients(patient_files, pids, window_size, step_size,
             if len(w) > 0:
                 windows_all.append(w)
                 labels_all.append(l)
-                groups_all.extend([pid_to_idx[pid]] * len(w))
+                groups_all.extend([pid] * len(w))
 
     if not windows_all:
         raise RuntimeError(f"No windows produced for {tag} set — check patient ids / data.")
@@ -480,7 +479,46 @@ def evaluate(name, y_te, y_pred, y_proba):
         "avg_confidence": avg_conf,
     }
 
-def run_split(train_pids, test_pids, patient_files, device, run_tag):
+def evaluate_patient_majority(name, groups, y_pred, y_proba, pid_labels):
+    df = pd.DataFrame({"pid": groups, "pred": y_pred, "proba": y_proba})
+    vote        = df.groupby("pid")["pred"].mean()
+    mean_proba  = df.groupby("pid")["proba"].mean()
+
+    y_pred_patient = (vote >= 0.5).astype(int)
+    y_true_patient = vote.index.map(pid_labels)
+
+    print(f"\n── Patient-level majority vote: {name} ────────────────────────")
+    print(classification_report(
+        y_true_patient, y_pred_patient,
+        target_names=['Survived (0)', 'Died (1)'],
+        zero_division=0
+    ))
+
+    cm = confusion_matrix(y_true_patient, y_pred_patient, labels=[0, 1])
+    print("Confusion Matrix (rows=actual, cols=predicted):")
+    print(f"                 Pred:Survived  Pred:Died")
+    print(f"  Actual Survived:    {cm[0,0]:5d}        {cm[0,1]:5d}")
+    print(f"  Actual Died:        {cm[1,0]:5d}        {cm[1,1]:5d}")
+
+    for pid in vote.index:
+        print(f"    patient {pid}: true={y_true_patient[pid]}  "
+              f"pred={y_pred_patient[pid]}  vote_frac_died={vote[pid]:.2f}  "
+              f"mean_proba={mean_proba[pid]:.3f}")
+
+    f1_died  = f1_score(y_true_patient, y_pred_patient, pos_label=1, zero_division=0)
+    f1_macro = f1_score(y_true_patient, y_pred_patient, average='macro', zero_division=0)
+    print(f"F1 (Died class)  : {f1_died:.4f}")
+    print(f"F1 (macro avg)   : {f1_macro:.4f}")
+
+    return {
+        "confusion_matrix": cm,
+        "f1_died": f1_died,
+        "f1_macro": f1_macro,
+        "y_true": y_true_patient,
+        "y_pred": y_pred_patient,
+    }
+
+def run_split(train_pids, test_pids, patient_files, device, run_tag, pid_labels):
     print(f"\n\n################## {run_tag} ##################")
     print(f"  Train patients : {len(train_pids)}")
     print(f"  Test  patients : {len(test_pids)}")
@@ -529,7 +567,7 @@ def run_split(train_pids, test_pids, patient_files, device, run_tag):
 
     split_results = {}
 
-    def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_):
+    def run_classifiers(tag, X_tr_, y_tr_, X_te_, y_te_, g_te_):
         print(f"\n===== {run_tag} / {tag}: SVM =====")
         base_svm = SVC(kernel='rbf', C=10.0, gamma='scale',
                         class_weight='balanced', random_state=42)
@@ -538,6 +576,8 @@ def run_split(train_pids, test_pids, patient_files, device, run_tag):
         y_pred = svm.predict(X_te_)
         y_proba = svm.predict_proba(X_te_)[:, 1]
         split_results[f"{tag}_SVM"] = evaluate(f"{run_tag} {tag} — SVM", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_SVM_patient"] = evaluate_patient_majority(
+            f"{run_tag} {tag} — SVM", g_te_, y_pred, y_proba, pid_labels)
         joblib.dump(svm, SAVE_DIR / f"svm_{tag}_{run_tag}.pkl")
 
         print(f"\n===== {run_tag} / {tag}: Random Forest =====")
@@ -549,15 +589,19 @@ def run_split(train_pids, test_pids, patient_files, device, run_tag):
         y_pred = rf.predict(X_te_)
         y_proba = rf.predict_proba(X_te_)[:, 1]
         split_results[f"{tag}_RF"] = evaluate(f"{run_tag} {tag} — Random Forest", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_RF_patient"] = evaluate_patient_majority(
+            f"{run_tag} {tag} — Random Forest", g_te_, y_pred, y_proba, pid_labels)
         joblib.dump(rf, SAVE_DIR / f"rf_{tag}_{run_tag}.pkl")
 
         print(f"\n===== {run_tag} / {tag}: One-Layer NN =====")
         nn_model, y_pred, y_proba = train_one_layer_nn(X_tr_, y_tr_, X_te_, y_te_, device)
         split_results[f"{tag}_NN"] = evaluate(f"{run_tag} {tag} — One-Layer NN", y_te_, y_pred, y_proba)
+        split_results[f"{tag}_NN_patient"] = evaluate_patient_majority(
+            f"{run_tag} {tag} — One-Layer NN", g_te_, y_pred, y_proba, pid_labels)
         torch.save(nn_model.state_dict(), SAVE_DIR / f"onelayernn_{tag}_{run_tag}.pth")
 
-    run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat)
-    run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat)
+    run_classifiers("RAW", X_tr_feat, y_tr_feat, X_te_feat, y_te_feat, g_test)
+    run_classifiers("PCA", X_tr_pca, y_tr_feat, X_te_pca, y_te_feat, g_test)
 
     return split_results
 
@@ -591,43 +635,66 @@ def main():
     for fold_info in cv_folds:
         run_tag = f"cv_fold{fold_info['fold']}"
         results = run_split(fold_info["train_pids"], fold_info["test_pids"],
-                             patient_files, DEVICE, run_tag)
+                             patient_files, DEVICE, run_tag, pid_labels)
         cv_results.append(results)
 
     print("\n\n========== CV SUMMARY on train pool (mean ± std across folds) ==========")
     model_keys = sorted(cv_results[0].keys())
-    header = f"  {'Model':<14}{'F1(Died)':>16}{'F1(macro)':>16}{'AUC':>16}"
+    header = f"  {'Model':<20}{'F1(Died)':>16}{'F1(macro)':>16}{'AUC':>16}"
     print(header)
     print("  " + "-" * (len(header) - 2))
     for k in model_keys:
-        f1d = [r[k]['f1_died']  for r in cv_results if r[k]['f1_died']  is not None]
-        f1m = [r[k]['f1_macro'] for r in cv_results if r[k]['f1_macro'] is not None]
-        auc = [r[k]['auc']      for r in cv_results if r[k]['auc']      is not None]
+        f1d = [r[k]['f1_died']  for r in cv_results if r[k].get('f1_died')  is not None]
+        f1m = [r[k]['f1_macro'] for r in cv_results if r[k].get('f1_macro') is not None]
+        auc = [r[k]['auc']      for r in cv_results if r[k].get('auc')      is not None]
 
         def fmt(vals):
             if not vals:
                 return "N/A"
             return f"{np.mean(vals):.4f}±{np.std(vals):.4f}"
 
-        print(f"  {k:<14}{fmt(f1d):>16}{fmt(f1m):>16}{fmt(auc):>16}")
+        print(f"  {k:<20}{fmt(f1d):>16}{fmt(f1m):>16}{fmt(auc):>16}")
 
     print("\n\n========== FINAL MODEL: trained on full train pool, "
           "evaluated on held-out TEST patients ==========")
-    final_results = run_split(train_pool_pids, holdout_pids, patient_files, DEVICE, "FINAL_HOLDOUT")
+    final_results = run_split(train_pool_pids, holdout_pids, patient_files, DEVICE, "FINAL_HOLDOUT", pid_labels)
 
-    print("\n\n========== HELD-OUT TEST SET — FINAL SCORES ==========")
+    print("\n\n========== HELD-OUT TEST SET — FINAL SCORES (window-level) ==========")
     header = f"  {'Model':<14}{'F1(Died)':>12}{'F1(macro)':>12}{'AUC':>10}{'AvgConf':>10}"
     print(header)
     print("  " + "-" * (len(header) - 2))
     for k, r in final_results.items():
+        if k.endswith("_patient"):
+            continue
         f1d  = f"{r['f1_died']:.4f}"   if r['f1_died']   is not None else "N/A"
         f1m  = f"{r['f1_macro']:.4f}"  if r['f1_macro']  is not None else "N/A"
         auc  = f"{r['auc']:.4f}"       if r['auc']       is not None else "N/A"
         conf = f"{r['avg_confidence']*100:.1f}%" if r['avg_confidence'] is not None else "N/A"
         print(f"  {k:<14}{f1d:>12}{f1m:>12}{auc:>10}{conf:>10}")
 
-    print("\n── Held-out test set confusion matrices ──")
+    print("\n── Held-out test set confusion matrices (window-level) ──")
     for k, r in final_results.items():
+        if k.endswith("_patient"):
+            continue
+        cm = r["confusion_matrix"]
+        print(f"\n  {k}")
+        print(f"                 Pred:Survived  Pred:Died")
+        print(f"  Actual Survived:    {cm[0,0]:5d}        {cm[0,1]:5d}")
+        print(f"  Actual Died:        {cm[1,0]:5d}        {cm[1,1]:5d}")
+
+    print("\n\n========== HELD-OUT TEST SET — FINAL SCORES (patient-level majority vote) ==========")
+    header = f"  {'Model':<20}{'F1(Died)':>12}{'F1(macro)':>12}"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for k, r in final_results.items():
+        if not k.endswith("_patient"):
+            continue
+        print(f"  {k:<20}{r['f1_died']:>12.4f}{r['f1_macro']:>12.4f}")
+
+    print("\n── Held-out test set confusion matrices (patient-level majority vote) ──")
+    for k, r in final_results.items():
+        if not k.endswith("_patient"):
+            continue
         cm = r["confusion_matrix"]
         print(f"\n  {k}")
         print(f"                 Pred:Survived  Pred:Died")
