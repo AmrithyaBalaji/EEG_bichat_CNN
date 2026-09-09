@@ -3,20 +3,18 @@ from pathlib import Path
 import numpy as np
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.model_selection import LeaveOneOut
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
 
 CLINICAL_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data.xls"
 EEG_CSV_DIR = r"C:\abalaji\bichat\eeg_csv"
 LABELED_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data_labeled.csv"
 FILTERED_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data_filtered.csv"
-OUTPUT_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data_labeled_imputed.csv"
-TARGET_COLS = ["IMC"]
+IMPUTED_PATH = r"C:\abalaji\bichat\EEG_bichat_CNN\clinical_data_labeled_imputed.csv"
 
-DO_IMPUTATION = False
+DO_IMPUTATION = True
 DO_TRAIN_RF = True
 
 COLUMNS = [
@@ -30,6 +28,8 @@ COLUMNS = [
     "Valeur NSE 1 (µg/L)",
 ]
 
+BINARY_COLS = ["SEXE", "HTA", "Diabète", "Obésité"]
+
 def find_label(pat_id):
     pat_id = str(int(pat_id))
     for label in [0, 1]:
@@ -41,10 +41,9 @@ def find_label(pat_id):
                 return label
     return None
 
-if Path(LABELED_PATH).exists() and Path(FILTERED_PATH).exists():
-    print(f"{LABELED_PATH} and {FILTERED_PATH} already exist, skipping labeling step")
+if Path(LABELED_PATH).exists():
+    print(f"{LABELED_PATH} already exists, skipping labeling step")
     df = pd.read_csv(LABELED_PATH)
-    complete_rows = pd.read_csv(FILTERED_PATH)
 else:
     df = pd.read_excel(CLINICAL_PATH)
     df = df[COLUMNS]
@@ -59,80 +58,71 @@ else:
     df = df[df["label"].notna()].reset_index(drop=True)
     df["label"] = df["label"].astype(int)
 
-    complete_rows = df.dropna().reset_index(drop=True)
-    print(f"{len(complete_rows)} rows have no missing values across all columns:")
-    print(complete_rows["N_PAT"].tolist())
-
-    complete_rows = complete_rows.drop(columns=["N_PAT"])
-    complete_rows.to_csv(FILTERED_PATH, index=False)
-    print(f"Saved to {FILTERED_PATH}")
-
     df = df.drop(columns=["N_PAT"])
     df.to_csv(LABELED_PATH, index=False)
     print(f"Saved to {LABELED_PATH}")
+    print(f"{len(df)} patients labeled")
+
+if Path(FILTERED_PATH).exists():
+    print(f"{FILTERED_PATH} already exists, skipping filtering step")
+    complete_rows = pd.read_csv(FILTERED_PATH)
+else:
+    complete_rows = df.dropna().reset_index(drop=True)
+    print(f"{len(complete_rows)} of {len(df)} patients have no missing values across all columns")
+    complete_rows.to_csv(FILTERED_PATH, index=False)
+    print(f"Saved to {FILTERED_PATH}")
 
 if DO_IMPUTATION:
-    if Path(OUTPUT_PATH).exists():
-        print(f"{OUTPUT_PATH} already exists, skipping imputation")
-        df = pd.read_csv(OUTPUT_PATH)
+    if Path(IMPUTED_PATH).exists():
+        print(f"{IMPUTED_PATH} already exists, skipping imputation")
+        df_imputed = pd.read_csv(IMPUTED_PATH)
     else:
-        # Count missing IMC before imputation
-        before_missing = df["IMC"].isna().sum()
+        df_imputed = df.copy()
 
-        # Mean IMC by obesity status
-        mean_imc_obese = df.loc[df["Obésité"] == 1, "IMC"].mean()
-        mean_imc_non_obese = df.loc[df["Obésité"] == 0, "IMC"].mean()
+        sexe_encoder = LabelEncoder()
+        non_null_sexe = df_imputed["SEXE"].dropna()
+        sexe_encoder.fit(non_null_sexe)
+        df_imputed["SEXE"] = df_imputed["SEXE"].map(
+            lambda v: sexe_encoder.transform([v])[0] if pd.notna(v) else np.nan
+        )
 
-        print(f"Mean IMC (Obésité=1): {mean_imc_obese:.2f}")
-        print(f"Mean IMC (Obésité=0): {mean_imc_non_obese:.2f}")
+        feature_cols = [c for c in df_imputed.columns if c != "label"]
+        missing_before = df_imputed[feature_cols].isna().sum()
+        print("Missing values before imputation:")
+        print(missing_before[missing_before > 0])
 
-        # Impute IMC according to obesity status
-        df.loc[df["IMC"].isna() & (df["Obésité"] == 1), "IMC"] = mean_imc_obese
-        df.loc[df["IMC"].isna() & (df["Obésité"] == 0), "IMC"] = mean_imc_non_obese
+        imputer = IterativeImputer(
+            estimator=RandomForestRegressor(n_estimators=100, random_state=42),
+            random_state=42,
+            max_iter=10
+        )
+        imputed_array = imputer.fit_transform(df_imputed[feature_cols])
+        df_imputed[feature_cols] = imputed_array
 
-        after_missing = df["IMC"].isna().sum()
+        for col in BINARY_COLS:
+            n_classes = len(sexe_encoder.classes_) if col == "SEXE" else 2
+            df_imputed[col] = df_imputed[col].round().clip(0, n_classes - 1).astype(int)
 
-        print(f"Imputed {before_missing - after_missing} IMC values")
-        print(f"Remaining missing IMC: {after_missing}")
+        df_imputed["SEXE"] = sexe_encoder.inverse_transform(df_imputed["SEXE"])
 
-        # Remove rows with missing NSE
-        before_rows = len(df)
-        df = df[df["Valeur NSE 1 (µg/L)"].notna()].reset_index(drop=True)
+        missing_after = df_imputed[feature_cols].isna().sum().sum()
+        print(f"Remaining missing values after imputation: {missing_after}")
 
-        print(f"Removed {before_rows - len(df)} rows with missing NSE")
-        print(f"Final dataset size: {len(df)} rows")
-
-        df.to_csv(OUTPUT_PATH, index=False)
-        print(f"Saved to {OUTPUT_PATH}")
+        df_imputed.to_csv(IMPUTED_PATH, index=False)
+        print(f"Saved to {IMPUTED_PATH}")
 
 if DO_TRAIN_RF:
 
-    rf_source = df if DO_IMPUTATION else complete_rows
+    rf_source = df_imputed if DO_IMPUTATION else complete_rows
 
     rf_df = rf_source.copy()
-
     rf_df["SEXE"] = LabelEncoder().fit_transform(rf_df["SEXE"])
 
-    X = rf_df.drop(columns=["label"])
-    y = rf_df["label"]
-
-    X = X.reset_index(drop=True)
-    y = y.reset_index(drop=True)
+    X = rf_df.drop(columns=["label"]).reset_index(drop=True)
+    y = rf_df["label"].reset_index(drop=True)
 
     scaler = StandardScaler()
-    X_scaled = pd.DataFrame(
-        scaler.fit_transform(X),
-        columns=X.columns
-    )
-
-    from sklearn.model_selection import LeaveOneOut
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import (
-        accuracy_score,
-        classification_report,
-        confusion_matrix,
-        roc_auc_score
-    )
+    X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
 
     loo = LeaveOneOut()
 
@@ -151,7 +141,6 @@ if DO_TRAIN_RF:
         y_train = y.iloc[train_index]
         y_test = y.iloc[test_index]
 
-
         clf = RandomForestClassifier(
             n_estimators=400,
             max_depth=None,
@@ -162,22 +151,15 @@ if DO_TRAIN_RF:
             random_state=42
         )
 
-        clf.fit(
-            X_train,
-            y_train
-        )
-
+        clf.fit(X_train, y_train)
 
         pred = clf.predict(X_test)
         prob = clf.predict_proba(X_test)
 
-
         all_true.append(y_test.values[0])
         all_pred.append(pred[0])
-
         all_prob_0.append(prob[0][0])
         all_prob_1.append(prob[0][1])
-
 
         print(
             f"Patient {counter}/{len(X_scaled)} "
@@ -189,68 +171,15 @@ if DO_TRAIN_RF:
 
         counter += 1
 
-
     print("\n==============================")
     print("LOO RANDOM FOREST RESULTS")
     print("==============================")
 
-
-    print(
-        "\nAccuracy:",
-        accuracy_score(
-            all_true,
-            all_pred
-        )
-    )
-
-
-    print(
-        "\nClassification Report"
-    )
-    print(
-        classification_report(
-            all_true,
-            all_pred
-        )
-    )
-
-
-    print(
-        "\nConfusion Matrix"
-    )
-    print(
-        confusion_matrix(
-            all_true,
-            all_pred
-        )
-    )
-
+    print("\nAccuracy:", accuracy_score(all_true, all_pred))
+    print("\nClassification Report")
+    print(classification_report(all_true, all_pred))
+    print("\nConfusion Matrix")
+    print(confusion_matrix(all_true, all_pred))
 
     if len(np.unique(all_true)) == 2:
-        print(
-            "\nROC-AUC:",
-            roc_auc_score(
-                all_true,
-                all_prob_1
-            )
-        )
-
-
-    results = rf_df.copy()
-
-    results["True_Label"] = all_true
-    results["Predicted_Label"] = all_pred
-
-    results["P(Label=0)"] = all_prob_0
-    results["P(Label=1)"] = all_prob_1
-
-
-    results.to_csv(
-        "randomforest_LOO_predictions.csv",
-        index=False
-    )
-
-
-    print(
-        "\nSaved: randomforest_LOO_predictions.csv"
-    )
+        print("\nROC-AUC:", roc_auc_score(all_true, all_prob_1))
