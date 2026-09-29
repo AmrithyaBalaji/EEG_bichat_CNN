@@ -11,12 +11,9 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from sklearn.model_selection import GroupShuffleSplit
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_class_weight
 
-# ============================================================
-# 1. CONFIG
-# ============================================================
 DATA_ROOT   = r"C:\abalaji\bichat\ORIGINAL_DATA\chunks_20"
 CLASSES     = ["0", "1"]
 CHANS       = 16
@@ -30,9 +27,9 @@ CHANNEL_NAMES = [
 ]
 
 TARGET_LENGTH = 15360
-CHUNK_PORTION = "second"   # "first", "second", or "full"
+CHUNK_PORTION = "full" # "first", "second", or "full"
 
-VAL_SIZE    = 0.2          # fraction of the remaining (non-held-out) patients used for validation
+VAL_SIZE    = 0.2
 
 BATCH_SIZE   = 32
 EPOCHS       = 50
@@ -41,16 +38,13 @@ WEIGHT_DECAY = 0.0
 PATIENCE     = 15
 USE_EARLY_STOPPING = False
 
-N_LOO_PER_CLASS = 5        # patients held out per class
-SAVE_FOLD_MODELS = False    # save each fold's best model to disk
+SAVE_FOLD_MODELS = False
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
-# ============================================================
-# 2. DATA LOADING
-# ============================================================
+
 def load_one_file(filepath, label_col_name="label"):
     df = pd.read_csv(filepath)
 
@@ -81,7 +75,7 @@ def load_one_file(filepath, label_col_name="label"):
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     channel_names = list(df.columns)
-    arr = df.values.T   # (Chans, Samples)
+    arr = df.values.T
 
     if arr.shape[0] != CHANS:
         raise ValueError(f"Expected {CHANS} channels, got {arr.shape[0]} in {filepath} "
@@ -132,9 +126,6 @@ print("Loading data...")
 X_list, y, patient_ids, channel_names = load_dataset(DATA_ROOT, CLASSES)
 print(f"Channel names (in order): {channel_names}")
 
-# ============================================================
-# 2b. FILTER: KEEP ONLY CHUNKS WITH LENGTH == TARGET_LENGTH
-# ============================================================
 lengths = [arr.shape[1] for arr in X_list]
 print(f"Chunk lengths -> min: {min(lengths)}, max: {max(lengths)}, unique: {len(set(lengths))}")
 print(f"Length distribution: {Counter(lengths)}")
@@ -152,9 +143,6 @@ X_list      = [arr for arr, keep in zip(X_list, keep_mask) if keep]
 y           = y[keep_mask]
 patient_ids = patient_ids[keep_mask]
 
-# ============================================================
-# 2c. SELECT CHUNK PORTION: "first" half, "second" half, or "full" chunk
-# ============================================================
 HALF_LENGTH = TARGET_LENGTH // 2
 
 if CHUNK_PORTION == "first":
@@ -168,17 +156,14 @@ elif CHUNK_PORTION == "full":
 else:
     raise ValueError(f"Unknown CHUNK_PORTION: {CHUNK_PORTION!r} (expected 'first', 'second', or 'full')")
 
-X = np.stack(X_list, axis=0).astype(np.float32)   # (N, Chans, Samples)
-X = X[:, np.newaxis, :, :]                         # (N, 1, Chans, Samples)
+X = np.stack(X_list, axis=0).astype(np.float32)
+X = X[:, np.newaxis, :, :]
 
 print(f"Using '{CHUNK_PORTION}' portion of each chunk: {SAMPLES} samples (of {TARGET_LENGTH})")
 print(f"Final data shape: {X.shape}, labels shape: {y.shape}")
 print(f"Class distribution (chunks): {np.bincount(y)}")
 print(f"Number of unique patients: {len(np.unique(patient_ids))}")
 
-# ============================================================
-# 3. PATIENT-LEVEL LABELS + LOO PATIENT SELECTION
-# ============================================================
 unique_pids = np.unique(patient_ids)
 pid_to_label = {}
 for pid in unique_pids:
@@ -191,22 +176,10 @@ for pid in unique_pids:
 print(f"\nPatient-level class distribution: "
       f"{np.bincount([pid_to_label[p] for p in unique_pids])}")
 
-rng = np.random.RandomState(RANDOM_SEED)
-loo_patients = []
-for label_idx in range(NB_CLASSES):
-    class_pids = np.array([p for p in unique_pids if pid_to_label[p] == label_idx])
-    if len(class_pids) < N_LOO_PER_CLASS:
-        raise RuntimeError(f"Class {label_idx} has only {len(class_pids)} patients, "
-                            f"need at least {N_LOO_PER_CLASS} for LOO selection.")
-    chosen = rng.choice(class_pids, size=N_LOO_PER_CLASS, replace=False)
-    loo_patients.extend(chosen.tolist())
+loo_patients = sorted(unique_pids.tolist())
+print(f"\nLOO over all {len(loo_patients)} patients")
 
-print(f"\nSelected {len(loo_patients)} LOO patients "
-      f"({N_LOO_PER_CLASS} per class): {loo_patients}")
 
-# ============================================================
-# 4. DATASET / MODEL / TRAIN / EVAL HELPERS
-# ============================================================
 class EEGDataset(Dataset):
     def __init__(self, X, y):
         self.X = torch.tensor(X, dtype=torch.float32)
@@ -220,7 +193,6 @@ class EEGDataset(Dataset):
 
 
 class MaxNormConstraint:
-    """Applies a max-norm constraint to a weight tensor, mimicking Keras' max_norm."""
     def __init__(self, max_val, dim=0):
         self.max_val = max_val
         self.dim = dim
@@ -234,7 +206,6 @@ class MaxNormConstraint:
 
 
 class DepthwiseConv2d(nn.Module):
-    """Depthwise conv where each input channel gets `depth_multiplier` filters."""
     def __init__(self, in_channels, depth_multiplier, kernel_size, bias=False):
         super().__init__()
         self.conv = nn.Conv2d(
@@ -247,7 +218,6 @@ class DepthwiseConv2d(nn.Module):
 
 
 class SeparableConv2d(nn.Module):
-    """Depthwise conv (per-channel) followed by pointwise (1x1) conv, matching Keras SeparableConv2D."""
     def __init__(self, in_channels, out_channels, kernel_size, padding=0, bias=False):
         super().__init__()
         self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size,
@@ -261,10 +231,6 @@ class SeparableConv2d(nn.Module):
 
 
 class EEGNet(nn.Module):
-    """
-    PyTorch port of EEGNet (Lawhern et al., 2018).
-    Input shape expected: (N, 1, Chans, Samples)
-    """
     def __init__(self, nb_classes, Chans=64, Samples=128,
                  dropoutRate=0.5, kernLength=64, F1=8,
                  D=2, F2=16, norm_rate=0.25, dropoutType='Dropout'):
@@ -280,7 +246,6 @@ class EEGNet(nn.Module):
         self.Chans = Chans
         self.Samples = Samples
 
-        # ---- Block 1 ----
         self.conv1 = nn.Conv2d(1, F1, kernel_size=(1, kernLength),
                                 padding=(0, kernLength // 2), bias=False)
         self.bn1   = nn.BatchNorm2d(F1)
@@ -290,14 +255,12 @@ class EEGNet(nn.Module):
         self.pool1     = nn.AvgPool2d((1, 4))
         self.drop1     = self.dropoutType(dropoutRate)
 
-        # ---- Block 2 ----
         self.separable = SeparableConv2d(F1 * D, F2, kernel_size=(1, 16),
                                           padding=(0, 8), bias=False)
         self.bn3    = nn.BatchNorm2d(F2)
         self.pool2  = nn.AvgPool2d((1, 8))
         self.drop2  = self.dropoutType(dropoutRate)
 
-        # ---- Compute flattened feature size dynamically ----
         with torch.no_grad():
             dummy = torch.zeros(1, 1, Chans, Samples)
             out = self._forward_features(dummy)
@@ -433,9 +396,6 @@ def evaluate_model(model, loader):
     return y_true, y_pred, y_probs
 
 
-# ============================================================
-# 5. LOO CROSS-VALIDATION LOOP
-# ============================================================
 all_chunk_true = []
 all_chunk_pred = []
 all_patient_true = []
@@ -510,9 +470,6 @@ for fold_i, loo_pid in enumerate(loo_patients, start=1):
         "best_val_loss": best_val_loss,
     })
 
-# ============================================================
-# 6. FINAL AGGREGATED RESULTS ACROSS ALL LOO FOLDS
-# ============================================================
 all_chunk_true = np.array(all_chunk_true)
 all_chunk_pred = np.array(all_chunk_pred)
 all_patient_true = np.array(all_patient_true)
@@ -527,7 +484,7 @@ for s in fold_summaries:
           f"| best val loss {s['best_val_loss']:.4f}")
 
 print(f"\n{'#'*70}")
-print("FINAL RESULTS — CHUNK LEVEL (pooled across all 10 held-out patients)")
+print(f"FINAL RESULTS — CHUNK LEVEL (pooled across all {len(loo_patients)} held-out patients)")
 print(f"{'#'*70}")
 print(f"Chunk-level accuracy: {(all_chunk_true == all_chunk_pred).mean():.4f} "
       f"({(all_chunk_true == all_chunk_pred).sum()}/{len(all_chunk_true)})")

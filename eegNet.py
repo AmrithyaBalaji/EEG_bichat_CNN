@@ -25,6 +25,7 @@ NB_CLASSES  = 2
 RANDOM_SEED = 42
 
 TARGET_LENGTH = 15360
+CHUNK_PORTION = "second"   # "first", "second", or "full"
 
 TEST_SIZE   = 0.2
 VAL_SIZE    = 0.2
@@ -144,10 +145,26 @@ X_list      = [arr for arr, keep in zip(X_list, keep_mask) if keep]
 y           = y[keep_mask]
 patient_ids = patient_ids[keep_mask]
 
-SAMPLES = TARGET_LENGTH
+# ============================================================
+# 2c. SELECT CHUNK PORTION: "first" half, "second" half, or "full" chunk
+# ============================================================
+HALF_LENGTH = TARGET_LENGTH // 2
+
+if CHUNK_PORTION == "first":
+    X_list = [arr[:, :HALF_LENGTH] for arr in X_list]
+    SAMPLES = HALF_LENGTH
+elif CHUNK_PORTION == "second":
+    X_list = [arr[:, HALF_LENGTH:] for arr in X_list]
+    SAMPLES = TARGET_LENGTH - HALF_LENGTH
+elif CHUNK_PORTION == "full":
+    SAMPLES = TARGET_LENGTH
+else:
+    raise ValueError(f"Unknown CHUNK_PORTION: {CHUNK_PORTION!r} (expected 'first', 'second', or 'full')")
+
 X = np.stack(X_list, axis=0).astype(np.float32)   # (N, Chans, Samples)
 X = X[:, np.newaxis, :, :]                         # (N, 1, Chans, Samples)
 
+print(f"Using '{CHUNK_PORTION}' portion of each chunk: {SAMPLES} samples (of {TARGET_LENGTH})")
 print(f"Final data shape: {X.shape}, labels shape: {y.shape}")
 print(f"Class distribution (chunks): {np.bincount(y)}")
 print(f"Number of unique patients: {len(np.unique(patient_ids))}")
