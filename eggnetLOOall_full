@@ -1,0 +1,123 @@
+######################################################################
+FINAL RESULTS — CHUNK LEVEL (pooled across all 91 held-out patients)
+######################################################################
+Chunk-level accuracy: 0.7071 (1287/1820)
+
+Classification Report (chunk-level):
+              precision    recall  f1-score   support
+
+           0       0.77      0.86      0.81      1360
+           1       0.38      0.25      0.31       460
+
+    accuracy                           0.71      1820
+   macro avg       0.58      0.56      0.56      1820
+weighted avg       0.67      0.71      0.69      1820
+
+Confusion Matrix (chunk-level):
+[[1170  190]
+ [ 343  117]]
+
+######################################################################
+FINAL RESULTS — PATIENT LEVEL (majority vote, one row per held-out patient)
+######################################################################
+Patient-level accuracy: 0.7582 (69/91)
+
+Classification Report (patient-level):
+              precision    recall  f1-score   support
+
+           0       0.78      0.94      0.85        68
+           1       0.56      0.22      0.31        23
+
+    accuracy                           0.76        91
+   macro avg       0.67      0.58      0.58        91
+weighted avg       0.72      0.76      0.72        91
+
+Confusion Matrix (patient-level):
+[[64  4]
+ [18  5]]
+
+
+
+ SECOND
+
+
+ #####################################################################
+FINAL RESULTS — CHUNK LEVEL (pooled across all 91 held-out patients)
+######################################################################
+Chunk-level accuracy: 0.7280 (1325/1820)
+
+Classification Report (chunk-level):
+              precision    recall  f1-score   support
+
+           0       0.77      0.90      0.83      1360
+           1       0.43      0.23      0.30       460
+
+    accuracy                           0.73      1820
+   macro avg       0.60      0.56      0.57      1820
+weighted avg       0.69      0.73      0.70      1820
+
+Confusion Matrix (chunk-level):
+[[1219  141]
+ [ 354  106]]
+
+######################################################################
+FINAL RESULTS — PATIENT LEVEL (majority vote, one row per held-out patient)
+######################################################################
+Patient-level accuracy: 0.7473 (68/91)
+
+Classification Report (patient-level):
+              precision    recall  f1-score   support
+
+           0       0.76      0.96      0.85        68
+           1       0.50      0.13      0.21        23
+
+    accuracy                           0.75        91
+   macro avg       0.63      0.54      0.53        91
+weighted avg       0.70      0.75      0.69        91
+
+Confusion Matrix (patient-level):
+[[65  3]
+ [20  3]]
+
+
+
+ FIRST
+
+
+######################################################################
+FINAL RESULTS — CHUNK LEVEL (pooled across all 91 held-out patients)
+######################################################################
+Chunk-level accuracy: 0.7429 (1352/1820)
+
+Classification Report (chunk-level):
+              precision    recall  f1-score   support
+
+           0       0.79      0.90      0.84      1360
+           1       0.48      0.28      0.35       460
+
+    accuracy                           0.74      1820
+   macro avg       0.64      0.59      0.60      1820
+weighted avg       0.71      0.74      0.72      1820
+
+Confusion Matrix (chunk-level):
+[[1224  136]
+ [ 332  128]]
+
+######################################################################
+FINAL RESULTS — PATIENT LEVEL (majority vote, one row per held-out patient)
+######################################################################
+Patient-level accuracy: 0.7802 (71/91)
+
+Classification Report (patient-level):
+              precision    recall  f1-score   support
+
+           0       0.79      0.97      0.87        68
+           1       0.71      0.22      0.33        23
+
+    accuracy                           0.78        91
+   macro avg       0.75      0.59      0.60        91
+weighted avg       0.77      0.78      0.73        91
+
+Confusion Matrix (patient-level):
+[[66  2]
+ [18  5]]
